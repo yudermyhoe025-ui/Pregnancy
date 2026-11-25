@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════
 
 export const extensionName = 'reproductive-system';
+export const EXT_VERSION = '3.15.2-chats.3';
 
 export const defaultSettings = {
     isEnabled: true,
@@ -41,6 +42,11 @@ export const defaultSettings = {
     // Возраст в RP-днях, после которого малыш считается «выросшим»: инфоблок сбрасывается,
     // ребёнок переходит в архив p.grownChildren. Дефолт 730 = 2 года.
     babyMaxAgeDays: 730,
+    // Откуда читать RP-дату: 'tag' (скрытый тег RP_DATE от модели) или 'chat' (формат пользователя
+    // в тексте ответа: [ | 24.10.2026 | ], [17 октября], [date: 12/12/1487]).
+    dateSource: 'tag',
+    // Необязательный свой шаблон даты с именованными группами d, m, y, h, min
+    dateRegex: '',
     // Отладка: НЕ вырезать теги из текста сообщений (видны прямо в чате)
     debugKeepTags: false,
 
@@ -75,6 +81,7 @@ export const PER_CHAT_KEYS = [
     'realism', 'menstruationEnabled',
     'pregnancyDuration', 'twinsChance', 'tripletsChance', 'babyMaxAgeDays',
     'autoScan', 'scanDepth', 'scanResponseLength',
+    'dateSource', 'dateRegex',
     'totalChecks', 'totalConceptions',
     '_conceptionBlockedUntilUser', '_conceptionBlockedUntilChar',
     '_birthBlockedUntilUser', '_birthBlockedUntilChar', '_conceptionBlockedUntil',

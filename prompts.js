@@ -113,7 +113,11 @@ export function getBasePrompt() {
     b += `At the end, output one HTML comment with current scene values (${langRequirement().langName}, 2–5 words per field; do not echo stale notes):\n<!-- [RP_STATUS:${JSON.stringify(status)}] -->\n`;
     b += langRequirement().line + '\n';
     if (p.hasBaby) b += 'Baby labels are identifiers, never rename them. Set milestone only for a new first achievement in this scene.\n';
-    b += 'Last line: <!-- [RP_DATE:DD.MM.YYYY HH:MM] --> using current RP time. Event markers occur once, only in the final reply, never in reasoning or visible prose.\n';
+    if (s.dateSource === 'chat') {
+        b += 'Do not add an RP_DATE tag: the RP date is read from the date marker your reply already contains. Event markers occur once, only in the final reply, never in reasoning or visible prose.\n';
+    } else {
+        b += 'Last line: <!-- [RP_DATE:DD.MM.YYYY HH:MM] --> using current RP time. Event markers occur once, only in the final reply, never in reasoning or visible prose.\n';
+    }
     return b;
 }
 

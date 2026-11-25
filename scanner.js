@@ -426,7 +426,7 @@ export function scanStatusTag(text) {
 
 // Parse RP_DATE tag → Date or null
 // Если тег содержит время (HH:MM), оно сохраняется в .rpTime результата.
-export function scanDateTag(text) {
+export function scanDateTag(text, opts = null) {
     if (!text) return null;
     let m = text.match(RP_DATE_RE_DOT);
     if (m) return _parseDate(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), m[4], m[5]);
@@ -439,7 +439,85 @@ export function scanDateTag(text) {
     // Only the diary entry header is a clock. Dates mentioned inside its prose aren't.
     const diary = text.match(/<!--\s*diary\s*(?:📖\s*)?(?:Дневник|Diary)\s+(\d{1,2})\.(\d{1,2})\.(\d{1,4})[,\s]+(\d{1,2}):(\d{2})/i);
     if (diary) return _parseDate(+diary[1], +diary[2], +diary[3], diary[4], diary[5]);
+    // Дата в видимом тексте ответа (формат пользователя): только если чат так настроен.
+    if (opts && opts.loose) return parseLooseDate(text, { ref: opts.ref, customRegex: opts.customRegex });
     return null;
+}
+
+// ─── Дата из формата пользователя ───
+// Читает даты вида [ | 24.10.2026 | ], [17 октября], [date: 12/12/1487], [October 17, 1952 14:30].
+// Берётся только содержимое квадратных скобок, целиком состоящее из даты и времени,
+// поэтому даты из обычного текста («в 1487 году») не подхватываются.
+const MONTH_WORDS = {
+    'янв': 1, 'фев': 2, 'мар': 3, 'апр': 4, 'мая': 5, 'май': 5, 'июн': 6, 'июл': 7, 'авг': 8, 'сен': 9, 'окт': 10, 'ноя': 11, 'дек': 12,
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+};
+
+function monthFromWord(word) {
+    const w = String(word || '').toLowerCase().replace(/\./g, '');
+    if (w.length < 3) return null;
+    return MONTH_WORDS[w.slice(0, 3)] || null;
+}
+
+function monthFromAny(v) {
+    if (v === undefined || v === null || v === '') return null;
+    if (/^\d{1,2}$/.test(String(v))) return parseInt(v);
+    return monthFromWord(v);
+}
+
+// Год не указан: берём год последней известной даты; если дата ушла сильно назад, считаем, что наступил следующий год.
+function _inferYear(day, month, ref) {
+    const refD = ref ? new Date(ref) : null;
+    if (!refD || isNaN(refD.getTime())) return 2000;
+    let year = refD.getFullYear();
+    const cand = new Date(year, month - 1, day);
+    if (cand.getTime() < refD.getTime() - 180 * 86400000) year += 1;
+    return year;
+}
+
+export function parseLooseDate(text, { ref = null, customRegex = '' } = {}) {
+    if (!text) return null;
+    const build = (d, mo, y, h, mi) => {
+        const month = monthFromAny(mo);
+        const day = parseInt(d);
+        if (!month || !(day >= 1 && day <= 31)) return null;
+        const year = (y === undefined || y === null || y === '') ? _inferYear(day, month, ref) : parseInt(y);
+        return _parseDate(day, month, year, h === undefined || h === '' ? undefined : h, mi === undefined || mi === '' ? undefined : mi);
+    };
+
+    // Свой шаблон пользователя: именованные группы d, m, y, h, min. Берём последнее совпадение.
+    if (customRegex) {
+        try {
+            const re = new RegExp(customRegex, 'gi');
+            let last = null;
+            for (const m of String(text).matchAll(re)) last = m;
+            if (last && last.groups) {
+                const g = last.groups;
+                const r = build(g.d, g.m, g.y, g.h, g.min);
+                if (r) return r;
+            }
+        } catch (e) { /* неверный шаблон: падаем на встроенный разбор */ }
+    }
+
+    const LABEL = /^(?:date|дата|time|время|day|день)\s*[:=\-]?\s*/i;
+    const TAIL = '(?:[\\s,T]+(\\d{1,2}):(\\d{2}))?';
+    const P_NUM = new RegExp('^(\\d{1,2})[./](\\d{1,2})[./](\\d{2,4})' + TAIL + '$');
+    const P_ISO = new RegExp('^(\\d{4})-(\\d{1,2})-(\\d{1,2})' + TAIL + '$');
+    const P_DMON = new RegExp('^(\\d{1,2})\\s+([A-Za-zА-Яа-яЁё]{3,}\\.?)(?:\\s+(\\d{1,4}))?' + TAIL + '$');
+    const P_MOND = new RegExp('^([A-Za-z]{3,}\\.?)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{1,4}))?' + TAIL + '$', 'i');
+
+    let found = null;
+    for (const m of String(text).matchAll(/\[([^\[\]\n]{3,80})\]/g)) {
+        let inner = m[1].replace(/[|·•]/g, ' ').replace(/\s+/g, ' ').trim();
+        inner = inner.replace(LABEL, '').trim();
+        let r = null, x;
+        if ((x = inner.match(P_NUM))) r = build(x[1], x[2], x[3], x[4], x[5]);
+        else if ((x = inner.match(P_ISO))) r = build(x[3], x[2], x[1], x[4], x[5]);
+        else if ((x = inner.match(P_DMON)) && monthFromWord(x[2])) r = build(x[1], x[2], x[3], x[4], x[5]);
+        else if ((x = inner.match(P_MOND)) && monthFromWord(x[1])) r = build(x[2], x[1], x[3], x[4], x[5]);
+        if (r) found = r;
+    }
+    return found;
 }
 
 function _parseDate(day, month, year, hourStr, minStr) {

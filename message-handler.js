@@ -1042,14 +1042,20 @@ export async function onMessageSent(messageIndex, type) {
 
 // ─── Process RP_DATE tag from text (can be called from index.js on render) ───
 
+// Параметры чтения даты для текущего чата (см. настройку «Откуда читать дату»).
+function dateScanOpts(s, p) {
+    return { loose: s.dateSource === 'chat', customRegex: s.dateRegex || '', ref: p?.rpDate || null };
+}
+
 export function processDateTag(text) {
     if (!text) return false;
     text = stripThink(text);
     const s = getSettings();
-    const rpDate = scanDateTag(text);
+    const p = getPregnancyData();
+    const dateOpts = dateScanOpts(s, p);
+    const rpDate = scanDateTag(text, dateOpts);
     if (!rpDate) return false;
 
-    const p = getPregnancyData();
     // Сохраняем RP-время (HH:MM) если модель его прислала
     if (rpDate.rpTime) {
         p.rpTime = rpDate.rpTime;
@@ -1064,7 +1070,7 @@ export function processDateTag(text) {
             for (let i = chat.length - 2; i >= 0; i--) {
                 const msg = chat[i];
                 if (msg && msg.mes && !msg.is_system) {
-                    const prev = scanDateTag(stripThink(rawTextOf(msg)));
+                    const prev = scanDateTag(stripThink(rawTextOf(msg)), dateOpts);
                     if (prev) {
                         prevRaw = prev.toISOString();
                         break;

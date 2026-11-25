@@ -13,6 +13,7 @@ function cycleSummary(who, c, s) {
 function getPhaseInfo(day, lang = 'ru', who = 'user') { return cyclePhase(getSettings(), who, day, lang); }
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
+import { EXT_VERSION } from './config.js';
 import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
 import { isOmegaverse, hasMenstrualCycle, canCarry, hasAnyTracking, hasCycle, designationOf, roleLabel, cyclePhase } from './omegaverse.js';
 import { missedDays, fertileWindow } from './fertility.js';
@@ -1155,6 +1156,10 @@ export function syncUI() {
     const enabled = el('repro-enabled');
     const notify = el('repro-notify');
     if (enabled) enabled.checked = s.isEnabled;
+    const dateSrc = el('repro-date-source');
+    if (dateSrc) dateSrc.value = s.dateSource || 'tag';
+    const dateRe = el('repro-date-regex');
+    if (dateRe && document.activeElement !== dateRe) dateRe.value = s.dateRegex || '';
     if (notify) notify.checked = s.showNotifications;
 
     const contraUser = el('repro-contraception-user');
@@ -1471,6 +1476,15 @@ export function setupUI() {
         <div class="reproductive-system-settings">
             <label class="checkbox_label"><input type="checkbox" id="repro-enabled"><span>${L('enabled')}</span></label>
             <div class="repro-chat-note" style="font-size:11px;opacity:.7;margin:0 0 6px 0">Включение и все настройки ниже относятся только к этому чату. В новых чатах расширение выключено.</div>
+            <div class="repro-date-source" style="display:flex;flex-direction:column;gap:4px;margin:0 0 8px 0">
+                <label for="repro-date-source" style="font-size:12px">Откуда читать дату RP:</label>
+                <select id="repro-date-source" class="text_pole">
+                    <option value="tag">Скрытый тег от расширения (&lt;!-- RP_DATE --&gt;)</option>
+                    <option value="chat">Из моего формата в тексте ответа ([ | 24.10.2026 | ], [17 октября])</option>
+                </select>
+                <input type="text" id="repro-date-regex" class="text_pole" placeholder="Свой шаблон даты (необязательно)" title="Регулярное выражение с именованными группами d (день), m (месяц числом или словом), y (год), h (час), min (минуты). Если не подошёл, работает встроенный разбор.">
+            </div>
+            <div style="font-size:10px;opacity:.5;margin:0 0 6px 0">Версия расширения: ${EXT_VERSION}</div>
             <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
             <hr>
             <div style="display:flex;gap:4px;align-items:center">
@@ -1687,6 +1701,15 @@ export function setupUI() {
             }
         });
         $('#repro-notify').on('change', function() { getSettings().showNotifications = this.checked; saveSettingsDebounced(); });
+        $('#repro-date-source').on('change', function() {
+            getSettings().dateSource = this.value === 'chat' ? 'chat' : 'tag';
+            saveSettingsDebounced();
+            updatePromptInjection();
+        });
+        $('#repro-date-regex').on('change', function() {
+            getSettings().dateRegex = String(this.value || '').trim().slice(0, 300);
+            saveSettingsDebounced();
+        });
         $('#repro-baby-max-age').on('change', function() {
             const v = parseInt(this.value) || 730;
             getSettings().babyMaxAgeDays = v;
