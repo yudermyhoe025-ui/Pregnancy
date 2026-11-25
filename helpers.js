@@ -259,12 +259,17 @@ const COMPLICATIONS = {
  * Roll ALL complications at conception. Each complication is rolled once:
  * either it will happen at a specific week, or it won't happen at all.
  */
-export function rollPlannedComplications() {
+export function rollPlannedComplications(duration = 40) {
     const planned = [];
     const allPools = [...COMPLICATIONS.early, ...COMPLICATIONS.mid, ...COMPLICATIONS.late];
+    // Окна заданы для срока 40 недель. Масштабируем под реальный срок чата,
+    // иначе при сроке 32 недели поздние осложнения (28-38) никогда не наступят.
+    const k = Math.max(0.3, (parseInt(duration) || 40) / 40);
     for (const comp of allPools) {
         if (roll(100) <= comp.chance) {
-            const week = comp.weekMin + Math.floor(Math.random() * (comp.weekMax - comp.weekMin + 1));
+            const wMin = Math.max(1, Math.round(comp.weekMin * k));
+            const wMax = Math.max(wMin, Math.round(comp.weekMax * k));
+            const week = wMin + Math.floor(Math.random() * (wMax - wMin + 1));
             planned.push({
                 type: comp.type,
                 severity: comp.severity,

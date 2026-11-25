@@ -1470,6 +1470,7 @@ export function setupUI() {
     <div class="inline-drawer-content">
         <div class="reproductive-system-settings">
             <label class="checkbox_label"><input type="checkbox" id="repro-enabled"><span>${L('enabled')}</span></label>
+            <div class="repro-chat-note" style="font-size:11px;opacity:.7;margin:0 0 6px 0">Включение и все настройки ниже относятся только к этому чату. В новых чатах расширение выключено.</div>
             <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
             <hr>
             <div style="display:flex;gap:4px;align-items:center">
@@ -1669,6 +1670,11 @@ export function setupUI() {
             getSettings().isEnabled = this.checked;
             saveSettingsDebounced();
             updatePromptInjection();
+            refreshAll();
+            // Включили в чате, где уже есть история: подтягиваем состояние из текста.
+            if (this.checked) {
+                import('./index.js').then(m => m.maybeBootstrapFromHistory && m.maybeBootstrapFromHistory()).catch(() => {});
+            }
             // Выключили — теги из прошлых сообщений всё ещё в контексте и тянут сюжет.
             // Расширение их больше не обслуживает, так что предлагаем убрать.
             if (!this.checked) {

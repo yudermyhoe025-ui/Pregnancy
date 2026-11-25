@@ -536,7 +536,7 @@ export function checkConception() {
         p.conceptionDate = freshConception;
         p._conceptionAnchored = !!p.rpDate;
         p.pregnancyWeeks = 0;
-        p._plannedComplications = rollPlannedComplications();
+        p._plannedComplications = rollPlannedComplications(s.pregnancyDuration);
         s.totalConceptions++;
 
         const twinsChance = s.twinsChance || 3;
@@ -1066,7 +1066,7 @@ export function partnerCheckConception() {
         c.conceptionDate = p.rpDate || null;
         c._conceptionAnchored = !!p.rpDate;
         c.pregnancyWeeks = 0;
-        c._plannedComplications = rollPlannedComplications();
+        c._plannedComplications = rollPlannedComplications(s.pregnancyDuration);
         c.healthStatus = 'normal';
         s.totalConceptions++;
         const mult = roll(1000) / 10;

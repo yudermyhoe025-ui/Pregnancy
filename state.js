@@ -3,16 +3,140 @@ import { reportError } from './diagnostics.js';
 // STATE — доступ к настройкам и данным
 // ═══════════════════════════════════════════
 
-import { carrierMode, canCarry } from './omegaverse.js';
 import { extension_settings } from '../../../extensions.js';
-import { extensionName, defaultPregnancyData, defaultPartnerData, LANG } from './config.js';
+import { extensionName, defaultPregnancyData, defaultPartnerData, LANG, PER_CHAT_KEYS, PER_CHAT_DEFAULTS } from './config.js';
 
-export function getSettings() {
-    const s = extension_settings[extensionName];
-    if (s) { s.carrierMode = carrierMode(s); if (!['user', 'char', 'both', 'none'].includes(s.trackFor)) s.trackFor = s.carrierMode; s.debugKeepTags = false; }
-    return s;
+// ──────────────────────────────────────────────────────────────────────
+// Настройки: общие + наложение значений текущего чата.
+// Ключи из PER_CHAT_KEYS читаются и пишутся в chatConfig[chatId]; всё остальное
+// идёт в общий объект. Весь остальной код по-прежнему работает через getSettings().
+// ──────────────────────────────────────────────────────────────────────
+const PER_CHAT_SET = new Set(PER_CHAT_KEYS);
+const MODES = ['user', 'char', 'both', 'none'];
+let _transientCfg = {};      // чат без id: настройки живут только в памяти
+const _proxies = new WeakMap();
+
+export function getRawSettings() {
+    return extension_settings[extensionName];
 }
 
+// Чат уже что-то делал: есть беременность, ребёнок, дата зачатия и т.п.
+function hasActivity(p) {
+    if (!p || typeof p !== 'object') return false;
+    const q = (p.partner && typeof p.partner === 'object') ? p.partner : {};
+    return !!(p.isPregnant || q.isPregnant || p.hasBaby
+        || (Array.isArray(p.babies) && p.babies.length)
+        || (Array.isArray(p.grownChildren) && p.grownChildren.length)
+        || p.conceptionDate || q.conceptionDate || p.postpartum || q.postpartum || p.testTakenAt);
+}
+
+// Запись карты по id чата; если лежит под другой формой id, переносим под текущий.
+function resolveEntry(map, chatId) {
+    if (!map || typeof map !== 'object' || !chatId) return undefined;
+    if (map[chatId]) return map[chatId];
+    for (const alt of computeChatIdForms()) {
+        if (alt !== chatId && map[alt]) {
+            map[chatId] = map[alt];
+            delete map[alt];
+            break;
+        }
+    }
+    return map[chatId];
+}
+
+// Настройки текущего чата без создания записи. null = чат ничего не настраивали.
+function peekChatConfig(raw) {
+    const chatId = getCurrentChatId();
+    if (!chatId) return _transientCfg;
+    if (!raw.chatConfig || typeof raw.chatConfig !== 'object') raw.chatConfig = {};
+    let cfg = resolveEntry(raw.chatConfig, chatId);
+    if (cfg) return cfg;
+
+    // Чат из старой версии: данные есть, а своих настроек ещё нет. Замораживаем текущие
+    // общие значения как настройки этого чата, чтобы дальше они не менялись из других чатов.
+    const legacy = resolveEntry(raw.chatPregnancyData, chatId);
+    if (legacy && hasActivity(legacy)) {
+        cfg = {};
+        for (const key of PER_CHAT_KEYS) {
+            if (key.startsWith('_')) continue;
+            if (raw[key] !== undefined) cfg[key] = raw[key];
+        }
+        cfg.isEnabled = raw.isEnabled !== false;
+        raw.chatConfig[chatId] = cfg;
+        return cfg;
+    }
+    return null;
+}
+
+// Настройки текущего чата для записи (создаёт запись при необходимости).
+function ensureChatConfig(raw) {
+    const cfg = peekChatConfig(raw);
+    if (cfg) return cfg;
+    const chatId = getCurrentChatId();
+    if (!chatId) return _transientCfg;
+    raw.chatConfig[chatId] = {};
+    return raw.chatConfig[chatId];
+}
+
+function readPerChat(raw, key) {
+    const cfg = peekChatConfig(raw);
+    const own = (cfg && cfg[key] !== undefined) ? cfg[key] : undefined;
+    if (key === 'carrierMode') {
+        if (MODES.includes(own)) return own;
+        const t = cfg && cfg.trackFor;
+        return MODES.includes(t) ? t : PER_CHAT_DEFAULTS.carrierMode;
+    }
+    if (key === 'trackFor') {
+        if (MODES.includes(own)) return own;
+        const m = cfg && cfg.carrierMode;
+        return MODES.includes(m) ? m : PER_CHAT_DEFAULTS.trackFor;
+    }
+    return own !== undefined ? own : PER_CHAT_DEFAULTS[key];
+}
+
+function wrapSettings(raw) {
+    if (_proxies.has(raw)) return _proxies.get(raw);
+    const proxy = new Proxy(raw, {
+        get(target, key, receiver) {
+            if (typeof key === 'string') {
+                if (PER_CHAT_SET.has(key)) return readPerChat(target, key);
+                if (key === 'debugKeepTags') return false;
+            }
+            return Reflect.get(target, key, receiver);
+        },
+        set(target, key, value) {
+            if (typeof key === 'string' && PER_CHAT_SET.has(key)) {
+                ensureChatConfig(target)[key] = value;
+                return true;
+            }
+            target[key] = value;
+            return true;
+        },
+        has(target, key) {
+            return (typeof key === 'string' && PER_CHAT_SET.has(key)) || Reflect.has(target, key);
+        },
+        deleteProperty(target, key) {
+            if (typeof key === 'string' && PER_CHAT_SET.has(key)) {
+                const cfg = peekChatConfig(target);
+                if (cfg) delete cfg[key];
+                return true;
+            }
+            return Reflect.deleteProperty(target, key);
+        },
+    });
+    _proxies.set(raw, proxy);
+    return proxy;
+}
+
+export function getSettings() {
+    const raw = getRawSettings();
+    return raw ? wrapSettings(raw) : raw;
+}
+
+// Включено ли расширение в текущем чате.
+export function isChatEnabled() {
+    return !!getSettings()?.isEnabled;
+}
 
 function cloneDefault(value) {
     return (value && typeof value === 'object') ? structuredClone(value) : value;
@@ -197,14 +321,15 @@ function getFallback() {
 
 export function resetFallback() {
     _fallback = null;
+    _transientCfg = {};
 }
 
 export function getPregnancyData() {
-    const s = getSettings();
+    const raw = getRawSettings();
     const chatId = getCurrentChatId();
 
-    if (!s.chatPregnancyData) {
-        s.chatPregnancyData = {};
+    if (!raw.chatPregnancyData) {
+        raw.chatPregnancyData = {};
     }
 
     // Нет chatId → fallback объект. ИЗМЕНЕНИЯ В НЁМ НЕ ПЕРЕЕЗЖАЮТ В ПОСТОЯННОЕ ХРАНИЛИЩЕ.
@@ -213,31 +338,29 @@ export function getPregnancyData() {
         return getFallback();
     }
 
-    // Данных под каноничным ключом нет — ищем под альтернативными формами id и мигрируем
-    if (!s.chatPregnancyData[chatId]) {
-        const aliases = computeChatIdForms();
-        for (const alt of aliases) {
-            if (alt !== chatId && s.chatPregnancyData[alt]) {
-                s.chatPregnancyData[chatId] = s.chatPregnancyData[alt];
-                delete s.chatPregnancyData[alt];
-                break;
-            }
-        }
+    // Данные под каноничным ключом или под альтернативными формами id (с переносом)
+    let existing = resolveEntry(raw.chatPregnancyData, chatId);
+
+    // В выключенном чате без данных запись не создаём: не раздуваем настройки
+    // записями для чатов, где расширение не используется.
+    if (!existing && !isChatEnabled()) {
+        return getFallback();
     }
 
     // Новый чат — создаём чистый объект (fallback не мигрируем)
-    if (!s.chatPregnancyData[chatId]) {
+    if (!existing) {
         const fresh = structuredClone(defaultPregnancyData);
         // Каждый новый чат стартует в случайной фазе цикла, а не всегда с 1-го дня
         fresh.cycleDay = 1 + Math.floor(Math.random() * 28);
         fresh.lastCycleUpdate = Date.now();
         fresh.partner = structuredClone(defaultPartnerData);
         fresh.partner.cycleDay = 1 + Math.floor(Math.random() * 28);
-        s.chatPregnancyData[chatId] = fresh;
+        raw.chatPregnancyData[chatId] = fresh;
+        existing = fresh;
     }
 
-    migratePregnancyData(s.chatPregnancyData[chatId], s);
-    return s.chatPregnancyData[chatId];
+    migratePregnancyData(existing, getSettings());
+    return existing;
 }
 
 // ──────────────────────────────────────────────────────────────────────

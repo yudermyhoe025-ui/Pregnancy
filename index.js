@@ -149,7 +149,7 @@ function refreshAfterChatChange(attempt = 1) {
 // состояние (даты, зачатия, роды, срок из текста). Кейс «играю уже беременная,
 // а расширку включила/поставила позже».
 let _bootstrapRunning = false;
-async function maybeBootstrapFromHistory() {
+export async function maybeBootstrapFromHistory() {
     if (_bootstrapRunning) return;
     try {
         const s = getSettings();

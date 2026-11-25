@@ -22,6 +22,9 @@ export const defaultSettings = {
     totalChecks: 0,
     totalConceptions: 0,
     chatPregnancyData: {},
+    // Настройки отдельных чатов: chatConfig[chatId] = { isEnabled, universe, trackFor, ... }
+    // Значения ключей из PER_CHAT_KEYS живут здесь, а не в корне настроек.
+    chatConfig: {},
     pregnancyDuration: 40,
     twinsChance: 3,
     tripletsChance: 0.1,
@@ -61,6 +64,27 @@ export const defaultSettings = {
     tryingToConceive: false,
 
 };
+
+// ── Настройки, которые живут отдельно в каждом чате ──
+// Всё остальное (тема, язык, уведомления, оформление инфоблока) общее.
+export const PER_CHAT_KEYS = [
+    'isEnabled',
+    'trackFor', 'carrierMode', 'universe', 'userDesignation', 'charDesignation',
+    'contraception', 'contraceptionUser', 'contraceptionChar',
+    'hiddenPregnancy', 'obviousAtWeek', 'tryingToConceive',
+    'realism', 'menstruationEnabled',
+    'pregnancyDuration', 'twinsChance', 'tripletsChance', 'babyMaxAgeDays',
+    'autoScan', 'scanDepth', 'scanResponseLength',
+    'totalChecks', 'totalConceptions',
+    '_conceptionBlockedUntilUser', '_conceptionBlockedUntilChar',
+    '_birthBlockedUntilUser', '_birthBlockedUntilChar', '_conceptionBlockedUntil',
+];
+
+// Значения для чата, в котором ничего не настраивали. Новый чат стартует выключенным.
+export const PER_CHAT_DEFAULTS = Object.fromEntries(PER_CHAT_KEYS.map(k => [
+    k,
+    k === 'isEnabled' ? false : (defaultSettings[k] === undefined ? null : defaultSettings[k]),
+]));
 
 export const defaultPregnancyData = {
     isPregnant: false,
