@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════
 
 export const extensionName = 'reproductive-system';
-export const EXT_VERSION = '3.15.2-chats.3';
+export const EXT_VERSION = '3.15.4-chats.5';
 
 export const defaultSettings = {
     isEnabled: true,

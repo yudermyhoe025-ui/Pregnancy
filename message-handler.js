@@ -1114,6 +1114,19 @@ export function processDateTag(text) {
         }
     }
 
+    // Недели считаем сразу от даты зачатия и прочитанной RP-даты, не дожидаясь смены дня:
+    // иначе после первой прочитанной даты (или ручной даты зачатия) срок оставался 0.
+    let weeksRefreshed = false;
+    for (const c of [p, getPartnerData()]) {
+        if (c.isPregnant && c.conceptionDate) {
+            const diff = rpDate.getTime() - new Date(c.conceptionDate).getTime();
+            if (Number.isFinite(diff) && diff >= 0) {
+                const w = Math.floor(diff / (7 * 86400000));
+                if (w !== c.pregnancyWeeks) { c.pregnancyWeeks = w; weeksRefreshed = true; }
+            }
+        }
+    }
+
     if (prevRaw) {
         const prev = new Date(prevRaw);
         const diffMs = rpDate.getTime() - prev.getTime();
@@ -1132,6 +1145,12 @@ export function processDateTag(text) {
     } else {
         saveSettingsDebounced();
     }
+    if (weeksRefreshed) {
+        saveSettingsDebounced();
+        syncUI();
+        updatePromptInjection();
+        setTimeout(renderInfoblock, 500);
+    }
     return false;
 }
 
@@ -1142,8 +1161,9 @@ export function setManualPregnancyWeeks(who, value) {
     const weeks = Math.max(0, Math.min(100, parseInt(value) || 0));
     const anchor = p.rpDate ? new Date(p.rpDate) : null;
     c.pregnancyWeeks = weeks;
+    // Без прочитанной RP-даты дату зачатия не стираем: просто запоминаем срок.
     c.conceptionDate = anchor && Number.isFinite(anchor.getTime())
-        ? new Date(anchor.getTime() - weeks * 7 * 86400000).toISOString() : null;
+        ? new Date(anchor.getTime() - weeks * 7 * 86400000).toISOString() : (c.conceptionDate || null);
     c._conceptionAnchored = !!c.conceptionDate;
     c._userSetWeeksAt = Date.now();
     refreshRegenSnapshot();

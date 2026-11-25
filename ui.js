@@ -14,7 +14,7 @@ function getPhaseInfo(day, lang = 'ru', who = 'user') { return cyclePhase(getSet
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
 import { EXT_VERSION } from './config.js';
-import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, getChat, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
 import { isOmegaverse, hasMenstrualCycle, canCarry, hasAnyTracking, hasCycle, designationOf, roleLabel, cyclePhase } from './omegaverse.js';
 import { missedDays, fertileWindow } from './fertility.js';
 import { HYGIENE, getFlow, getHygieneState, getPhaseEffects, hoursBetween } from './cycle-realism.js';
@@ -23,6 +23,7 @@ import { babyAgeDays, getCareNeeds, getGrowthStage, MILESTONE_ICONS, milestonesT
 import { calculateDueDate } from './date-parser.js';
 import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy, takePregnancyTest, revealPregnancy, getPostpartum, pregnancyIsKnown, daysSinceConception, setLactating, setTrying, monthsTrying, createUndoCheckpoint, undoLastDestructiveChange } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
+import { scanDateTag, messageRaw, stripThink } from './scanner.js';
 import { showNotification } from './notifications.js';
 
 function ic(n) { return `<i class="fa-solid ${n}"></i>`; }
@@ -1156,6 +1157,23 @@ export function syncUI() {
     const enabled = el('repro-enabled');
     const notify = el('repro-notify');
     if (enabled) enabled.checked = s.isEnabled;
+    const dateStatus = el('repro-date-status');
+    if (dateStatus) {
+        const fmtD = (v, withTime) => {
+            if (!v) return null;
+            const d = new Date(v);
+            if (isNaN(d.getTime())) return null;
+            return d.toLocaleString('ru-RU', withTime
+                ? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+                : { day: '2-digit', month: '2-digit', year: 'numeric' });
+        };
+        const parts = [`Дата RP: ${fmtD(p.rpDate, true) || 'не прочитана'}`];
+        parts.push(`Зачатие: ${p.isPregnant ? (fmtD(p.conceptionDate) || 'не задано') : '—'}`);
+        if (p.isPregnant && !p.rpDate) parts.push('RP-дата не прочитана: недели не считаются');
+        const q = p.partner;
+        if (q && q.isPregnant) parts.push(`Зачатие (партнёр): ${fmtD(q.conceptionDate) || 'не задано'}`);
+        dateStatus.textContent = parts.join(' · ');
+    }
     const dateSrc = el('repro-date-source');
     if (dateSrc) dateSrc.value = s.dateSource || 'tag';
     const dateRe = el('repro-date-regex');
@@ -1484,6 +1502,8 @@ export function setupUI() {
                 </select>
                 <input type="text" id="repro-date-regex" class="text_pole" placeholder="Свой шаблон даты (необязательно)" title="Регулярное выражение с именованными группами d (день), m (месяц числом или словом), y (год), h (час), min (минуты). Если не подошёл, работает встроенный разбор.">
             </div>
+            <div id="repro-date-status" style="font-size:11px;opacity:.85;margin:0 0 4px 0"></div>
+            <div class="menu_button" id="repro-date-test" style="font-size:11px;margin:0 0 6px 0;padding:3px 8px;width:fit-content">Проверить дату в последнем сообщении</div>
             <div style="font-size:10px;opacity:.5;margin:0 0 6px 0">Версия расширения: ${EXT_VERSION}</div>
             <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
             <hr>
@@ -1705,6 +1725,23 @@ export function setupUI() {
             getSettings().dateSource = this.value === 'chat' ? 'chat' : 'tag';
             saveSettingsDebounced();
             updatePromptInjection();
+        });
+        $('#repro-date-test').on('click', function() {
+            const chat = getChat();
+            let msg = null;
+            for (let i = chat.length - 1; i >= 0; i--) {
+                if (chat[i] && chat[i].mes && !chat[i].is_system) { msg = chat[i]; break; }
+            }
+            if (!msg) { showNotification('В чате нет сообщений', 'warning'); return; }
+            const s = getSettings(), p = getPregnancyData();
+            const d = scanDateTag(stripThink(messageRaw(msg)), { loose: s.dateSource === 'chat', customRegex: s.dateRegex || '', ref: p.rpDate || null });
+            const mode = s.dateSource === 'chat' ? 'из текста' : 'по тегу RP_DATE';
+            if (d) {
+                const txt = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + (d.rpTime ? ' ' + d.rpTime : '');
+                showNotification(`Нашла дату: ${txt} (режим: ${mode})`, 'success');
+            } else {
+                showNotification(`В последнем сообщении дата не найдена (режим: ${mode})`, 'warning');
+            }
         });
         $('#repro-date-regex').on('change', function() {
             getSettings().dateRegex = String(this.value || '').trim().slice(0, 300);
