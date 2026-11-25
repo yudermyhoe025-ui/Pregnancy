@@ -401,6 +401,18 @@ export function carrierName(who) {
     }
 }
 
+// Подставляет имена вместо макросов {{user}} / {{char}} (и старых <USER> / <BOT>).
+// Нужен для полей, куда имя вводят руками, например «второй родитель».
+export function resolveNameMacros(text) {
+    const src = String(text ?? '');
+    if (!src.includes('{{') && !/<\s*(user|bot)\s*>/i.test(src)) return src;
+    const user = carrierName('user');
+    const char = carrierName('char');
+    return src
+        .replace(/\{\{\s*user\s*\}\}|<\s*user\s*>/gi, user)
+        .replace(/\{\{\s*char\s*\}\}|<\s*bot\s*>/gi, char);
+}
+
 // Отслеживается ли носитель
 export function isTracked(who) { const mode = getSettings()?.trackFor || 'user'; return mode === 'both' || mode === who; }
 

@@ -13,7 +13,7 @@ function cycleSummary(who, c, s) {
 function getPhaseInfo(day, lang = 'ru', who = 'user') { return cyclePhase(getSettings(), who, day, lang); }
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
-import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, L, getContraception, syncBabyLegacyFields } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
 import { isOmegaverse, hasMenstrualCycle, canCarry, hasAnyTracking, hasCycle, designationOf, roleLabel, cyclePhase } from './omegaverse.js';
 import { missedDays, fertileWindow } from './fertility.js';
 import { HYGIENE, getFlow, getHygieneState, getPhaseEffects, hoursBetween } from './cycle-realism.js';
@@ -1584,7 +1584,7 @@ export function setupUI() {
                     </select>
                 </div>
                 <label for="repro-manual-second-parent" style="font-size:11px">Второй родитель</label>
-                <input type="text" id="repro-manual-second-parent" class="text_pole" maxlength="80" placeholder="Имя второго родителя" title="Для текущей беременности имя сохраняется при завершении ввода; для новой — при нажатии «Начать беременность».">
+                <input type="text" id="repro-manual-second-parent" class="text_pole" maxlength="80" placeholder="Имя, {{user}} или {{char}}" title="Можно писать имя или макросы {{user}} и {{char}}: они заменятся именами из чата. Для текущей беременности имя сохраняется при завершении ввода; для новой — при нажатии «Начать беременность».">
                 <button id="repro-manual-start" class="menu_button" style="width:100%">Начать беременность</button>
                 <small style="opacity:0.5;font-size:9px;font-weight:600;margin-top:4px">Малыш <span style="font-weight:400;opacity:0.7">(добавляется к существующим)</span></small>
                 <div style="display:flex;gap:4px;align-items:center">
@@ -1891,7 +1891,7 @@ export function setupUI() {
             }
             // Носитель: я или персонаж
             const who = $('#repro-manual-who').val() || 'user';
-            const secondParent = String($('#repro-manual-second-parent').val() || '').trim();
+            const secondParent = resolveNameMacros($('#repro-manual-second-parent').val() || '').trim();
             if (who === 'char') startPartnerPregnancy(conceptionDate.toISOString(), fetus, sexArr, secondParent);
             else startManualPregnancy(conceptionDate.toISOString(), fetus, sexArr, secondParent);
             syncUI();

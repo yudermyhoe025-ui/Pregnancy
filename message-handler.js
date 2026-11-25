@@ -5,7 +5,7 @@
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId } from './state.js';
 import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink, stripReproTags, hasReproTags, messageRaw, confirmedFetusCount } from './scanner.js';
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, getPostpartum, canTriggerBirth } from './pregnancy.js';
-import { getPartnerData, carrierName, isTracked } from './state.js';
+import { getPartnerData, carrierName, isTracked, resolveNameMacros } from './state.js';
 import { hasMenstrualCycle, hasCycle, cyclePhase } from './omegaverse.js';
 import { updateBabyCare } from './baby-care.js';
 import { DISRUPTIONS, disruptionShift } from './cycle-realism.js';
@@ -1174,7 +1174,7 @@ export function setSecondParent(who, name) {
     if (!['user','char'].includes(who)) return false;
     const carrier = who === 'char' ? getPartnerData() : getPregnancyData();
     if (!carrier.isPregnant) return false;
-    carrier.fatherName = String(name || '').trim().slice(0,80);
+    carrier.fatherName = resolveNameMacros(name).trim().slice(0,80);
     carrier._secondParentManual = true;
     refreshRegenSnapshot();
     saveSettingsDebounced();

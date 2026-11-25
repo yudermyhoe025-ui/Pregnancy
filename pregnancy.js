@@ -5,7 +5,7 @@
 import { snapshotState } from './snapshots.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { CHANCES } from './config.js';
-import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, isManualCycleProtected, carrierName, L, getContraception, syncBabyLegacyFields } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, isManualCycleProtected, carrierName, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
 import { canCarry, hasMenstrualCycle } from './omegaverse.js';
 import { rollTest, isObvious, postpartumState, fertileWindow, inheritLooks, conceptionStruggle, missedDays } from './fertility.js';
 import { roll, getCycleModifier, formatSexIcons, formatFetusCount, calculateWeeksFromDates, getHealthInfo, rollPlannedComplications } from './helpers.js';
@@ -833,7 +833,7 @@ export function startManualPregnancy(conceptionDateISO, fetusCount, fetusSex = n
     const count = Math.max(1, Math.min(4, parseInt(fetusCount) || 1));
 
     if (secondParent !== undefined) {
-        p.fatherName = String(secondParent).trim().slice(0, 80);
+        p.fatherName = resolveNameMacros(secondParent).trim().slice(0, 80);
         p._secondParentManual = true;
     }
     p.isPregnant = true;
@@ -1203,7 +1203,7 @@ export function startPartnerPregnancy(conceptionDateISO, fetusCount, fetusSex = 
     s._birthBlockedUntilChar = null;
     const count = Math.max(1, Math.min(4, parseInt(fetusCount) || 1));
     if (secondParent !== undefined) {
-        c.fatherName = String(secondParent).trim().slice(0, 80);
+        c.fatherName = resolveNameMacros(secondParent).trim().slice(0, 80);
         c._secondParentManual = true;
     }
     c.isPregnant = true;
