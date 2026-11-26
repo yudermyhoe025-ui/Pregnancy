@@ -1,29 +1,63 @@
 // Compatibility API. One cycle per explicitly selected carrier; no sex/role inference.
-import { getPhaseInfo } from './helpers.js';
+import { getPhaseInfo, getCycleModifier } from './helpers.js';
+import { fertileWindow } from './fertility.js';
+import { getUniverse, phaseAt, phaseName, phaseFertility, daysToActive } from './universe.js';
+import { getCarrier } from './state.js';
 export function isOmegaverse(s) { return s?.universe === 'omegaverse'; }
+export function isAbo(s) { return !!getUniverse(s).abo; }
+export function isPhased(s) { return getUniverse(s).kind === 'phased'; }
 export function carrierMode(s) {
     if (['user', 'char', 'both', 'none'].includes(s?.carrierMode)) return s.carrierMode;
     return ['user', 'char', 'both', 'none'].includes(s?.trackFor) ? s.trackFor : 'user';
 }
 export function canCarry(s, who) { const m = carrierMode(s); return (who === 'user' || who === 'char') && (m === 'both' || m === who); }
-export function hasMenstrualCycle(s, who) { return canCarry(s, who); }
+// Менструация есть только в обычном мире.
+export function hasMenstrualCycle(s, who) { return getUniverse(s).kind === 'menstrual' && canCarry(s, who); }
 export function hasAnyTracking(s, who) { const mode = s?.trackFor || 'user'; return mode === 'both' || mode === who; }
-// Legacy callers cannot reintroduce role-based fertility or independent clocks.
 export function designationOf(s, who) {
     const role = who === 'char' ? s?.charDesignation : s?.userDesignation;
     return ['alpha','beta','omega'].includes(role) ? role : who === 'char' ? 'alpha' : 'omega';
 }
-export function hasCycle(s, who) { return canCarry(s, who) || (isOmegaverse(s) && designationOf(s, who) !== 'beta'); }
-export function roleLabel(s, who) { return {alpha:'Альфа',beta:'Бета',omega:'Омега'}[designationOf(s,who)]; }
+// Есть ли у персонажа цикл (течка, гон или сезон). Беты и нейтралы его не имеют, зверолюди имеют все.
+export function hasCycle(s, who) {
+    if (canCarry(s, who)) return true;
+    const uni = getUniverse(s);
+    if (uni.kind !== 'phased') return false;
+    return uni.id === 'beastmen' || designationOf(s, who) !== 'beta';
+}
+export function roleLabel(s, who) {
+    const id = getUniverse(s).id;
+    const maps = {
+        omegaverse: { alpha: 'Альфа', beta: 'Бета', omega: 'Омега' },
+        ds: { alpha: 'Доминант', beta: 'Нейтрал', omega: 'Сабмиссив' },
+        beastmen: { alpha: 'Самец', beta: 'Самец', omega: 'Самка' },
+    };
+    return (maps[id] || maps.omegaverse)[designationOf(s, who)];
+}
 export function cyclePhase(s, who, day, lang = 'ru') {
-    const abo = isOmegaverse(s), role = designationOf(s, who), carrier = canCarry(s, who), en = lang === 'en';
+    const uni = getUniverse(s), en = lang === 'en', carrier = canCarry(s, who);
+    if (uni.kind === 'phased') {
+        const c = getCarrier(who);
+        const pa = phaseAt(c, uni, day);
+        return { name: phaseName(uni, pa.def, designationOf(s, who), lang), icon: pa.def.icon, color: pa.def.color, key: pa.def.key, active: pa.def.active };
+    }
     const info = getPhaseInfo(day, lang, false, s?.menstruationEnabled !== false && carrier);
-    if (!abo) return carrier ? info : { ...info, name: en ? 'State' : 'Состояние', color:'#999999' };
-    const active = day >= 12 && day <= 16;
-    if (role === 'beta') return carrier ? info : { ...info, name: en ? 'Beta' : 'Бета', color:'#999999' };
-    if (active) return { ...info, name: role === 'alpha' ? (carrier ? (en ? 'Ovulation / rut' : 'Овуляция / гон') : (en ? 'Rut' : 'Гон')) : (carrier ? (en ? 'Ovulation / heat' : 'Овуляция / течка') : (en ? 'Heat' : 'Течка')), color:'#ff6b6b' };
-    if (!carrier) return { ...info, name: role === 'alpha' ? (en ? 'Outside rut' : 'Вне гона') : (en ? 'Between heats' : 'Между течками'), color:'#a88ae3' };
-    return info;
+    return carrier ? info : { ...info, name: en ? 'State' : 'Состояние', color: '#999999' };
+}
+// Множитель шанса зачатия на текущий день цикла.
+export function fertilityMod(s, who, c, day) {
+    const uni = getUniverse(s);
+    if (uni.kind === 'menstrual') return canCarry(s, who) ? getCycleModifier(day) : 1;
+    return phaseFertility(c, uni, day);
+}
+// Фертильное окно для режима «планируем»: { fertile, peak, label, daysToPeak }
+export function fertileInfo(s, c, day) {
+    const uni = getUniverse(s);
+    if (uni.kind === 'menstrual') return fertileWindow(day, 28);
+    const pa = phaseAt(c, uni, day);
+    const fertile = pa.def.active;
+    return { fertile, peak: fertile && pa.progress >= 0.3 && pa.progress <= 0.8, label: fertile ? pa.def.name : 'Низкая фертильность',
+             daysToPeak: fertile ? 0 : daysToActive(c, uni, day) };
 }
 export function sexOf(s, who) { return who === 'char' ? s?.charSex : s?.userSex; }
 export function getCfg() { return { heatCycleLength: 28, heatDuration: 5, rutCycleLength: 28, rutDuration: 0 }; }

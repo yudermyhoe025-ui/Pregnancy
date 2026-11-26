@@ -110,7 +110,7 @@ export function scanMessage(text) {
     const cycleMatch = text.match(CYCLE_DAY_RE);
     if (cycleMatch) {
         const day = parseInt(cycleMatch[1]);
-        if (day >= 1 && day <= 28) cycleDay = day;
+        if (day >= 1 && day <= 120) cycleDay = day;
     }
 
     // ── Теги носителя-персонажа (suffix :CHAR) ──

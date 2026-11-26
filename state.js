@@ -4,6 +4,7 @@ import { reportError } from './diagnostics.js';
 // ═══════════════════════════════════════════
 
 import { extension_settings } from '../../../extensions.js';
+import { cycleLen } from './universe.js';
 import { extensionName, defaultPregnancyData, defaultPartnerData, LANG, PER_CHAT_KEYS, PER_CHAT_DEFAULTS } from './config.js';
 
 // ──────────────────────────────────────────────────────────────────────
@@ -435,21 +436,21 @@ export function L(key) {
 // ─── Cycle day accessors (per-chat) ───
 export function getCycleDay() {
     const p = getPregnancyData();
-    if (typeof p.cycleDay === 'number' && p.cycleDay >= 1 && p.cycleDay <= 28 + Math.max(0, parseInt(p._cycleShift) || 0)) {
+    const s = getSettings();
+    const max = cycleLen(p, s);
+    if (typeof p.cycleDay === 'number' && p.cycleDay >= 1 && p.cycleDay <= max) {
         return p.cycleDay;
     }
-    const s = getSettings();
     const globalCycle = (typeof s.cycleDay === 'number' && s.cycleDay >= 1 && s.cycleDay <= 28) ? s.cycleDay : 1;
-    p.cycleDay = globalCycle;
+    p.cycleDay = Math.min(globalCycle, max);
     if (!p.lastCycleUpdate && s.lastCycleUpdate) p.lastCycleUpdate = s.lastCycleUpdate;
     return p.cycleDay;
 }
 
 export function setCycleDay(day, updateTimestamp = true, isUserAction = false) {
     const p = getPregnancyData();
-    // При сбое цикла (реализм) текущий цикл растянут — день может уйти за 28,
-    // это и есть задержка. Без сбоя потолок обычный.
-    const maxDay = 28 + Math.max(0, parseInt(p._cycleShift) || 0);
+    // Потолок зависит от вселенной; при сбое цикла (реализм) в обычном мире день может уйти за 28.
+    const maxDay = cycleLen(p, getSettings());
     const d = Math.max(1, Math.min(maxDay, parseInt(day) || 1));
     p.cycleDay = d;
     if (updateTimestamp) p.lastCycleUpdate = Date.now();

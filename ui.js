@@ -1,21 +1,25 @@
 import { setManualCycleDay, setManualPregnancyWeeks, setSecondParent } from './message-handler.js';
 import { reportError } from './diagnostics.js';
 function cycleSummary(who, c, s) {
-    if (!hasCycle(s, who) && !c.isPregnant) return isOmegaverse(s) ? roleLabel(s, who) : 'Состояние';
+    if (!hasCycle(s, who) && !c.isPregnant) return isAbo(s) ? roleLabel(s, who) : 'Состояние';
     if (c.isPregnant && pregnancyIsKnown(c, s)) return `Беременность — ${c.pregnancyWeeks || 0} нед.`;
     const pp = getPostpartum(c, getPregnancyData());
     if (pp && !pp.cycleReturned) return 'После родов · цикл не вернулся';
+    const mens = getUniverse(s).kind === 'menstrual';
+    const len = mens ? 28 : cycleLen(c, s);
     const day = (who === 'char' ? (c.cycleDay || 1) : getCycleDay()) + (c.isPregnant ? daysSinceConception(c, getPregnancyData()) : 0);
-    if (day > 28) return `Задержка ${day - 28} дн.`;
-    if (c.isPregnant) return `День ${day}/28 · состояние по сцене`;
-    return `День ${day}/28 · ${getPhaseInfo(day, 'ru', who).name}`;
+    if (mens && day > 28) return `Задержка ${day - 28} дн.`;
+    const shown = Math.min(day, len);
+    if (c.isPregnant) return `День ${shown}/${len} · состояние по сцене`;
+    return `День ${shown}/${len} · ${getPhaseInfo(shown, 'ru', who).name}`;
 }
 function getPhaseInfo(day, lang = 'ru', who = 'user') { return cyclePhase(getSettings(), who, day, lang); }
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
 import { EXT_VERSION } from './config.js';
 import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, getChat, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
-import { isOmegaverse, hasMenstrualCycle, canCarry, hasAnyTracking, hasCycle, designationOf, roleLabel, cyclePhase } from './omegaverse.js';
+import { isOmegaverse, isAbo, hasMenstrualCycle, canCarry, hasAnyTracking, hasCycle, designationOf, roleLabel, cyclePhase, fertileInfo } from './omegaverse.js';
+import { getUniverse, phaseAt, cycleLen, resetCycleForUniverse } from './universe.js';
 import { missedDays, fertileWindow } from './fertility.js';
 import { HYGIENE, getFlow, getHygieneState, getPhaseEffects, hoursBetween } from './cycle-realism.js';
 import { getPhaseInfo as phaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
@@ -595,19 +599,22 @@ function cycleCardHtml(who, c, tr) {
     const hidden = c.isPregnant && !pregnancyIsKnown(c, s);
     const frozenDay = who === 'char' ? Math.max(1, c.cycleDay || 1) : getCycleDay();
     const rawDay = hidden ? frozenDay + daysSinceConception(c, p0) : frozenDay;
-    const day = Math.max(1, Math.min(28, rawDay));
+    const uni = getUniverse(s);
+    const mens = uni.kind === 'menstrual';
+    const maxLen = mens ? 28 : cycleLen(c, s);
+    const day = Math.max(1, Math.min(maxLen, rawDay));
     const phase = hidden ? { name: 'Состояние по сцене' } : getPhaseInfo(day, 'ru', who);
     const cycling = hasCycle(s, who);
     const carries = canCarry(s, who);
-    const role = isOmegaverse(s) ? roleLabel(s, who) : '';
-    const hot = isOmegaverse(s) && designationOf(s, who) !== 'beta' && day >= 12 && day <= 16;
-    const cyclePct = Math.min(100, Math.round(rawDay / 28 * 100));
-    const cd = carries ? getCycleDetails(s.menstruationEnabled === false && day <= 5 ? 6 : day) : { fertility:'—', libido:hot?'Высокое':'Обычное', mood:hot?'Возбуждение':'Спокойное', physical:hot?'Жар, чувствительность':'Норма', note:'' };
+    const role = isAbo(s) ? roleLabel(s, who) : '';
+    const hot = uni.kind === 'phased' && (uni.id === 'beastmen' || designationOf(s, who) !== 'beta') && phaseAt(c, uni, day).def.active;
+    const cyclePct = Math.min(100, Math.round(rawDay / maxLen * 100));
+    const cd = (carries && mens) ? getCycleDetails(s.menstruationEnabled === false && day <= 5 ? 6 : day) : carries ? { fertility: hot ? 'Высокая' : 'Низкая', libido: hot ? 'Высокое' : 'Обычное', mood: hot ? 'Возбуждение' : 'Спокойное', physical: hot ? 'Жар, чувствительность' : 'Норма', note: '' } : { fertility:'—', libido:hot?'Высокое':'Обычное', mood:hot?'Возбуждение':'Спокойное', physical:hot?'Жар, чувствительность':'Норма', note:'' };
 
     // Задержка / скрытая беременность: героиня не знает, но задержку видит
-    const delay = missedDays(rawDay, 28);
+    const delay = mens ? missedDays(rawDay, 28) : 0;
     const pp = getPostpartum(c, p0);
-    const win = carries && s.tryingToConceive ? fertileWindow(day, 28) : null;
+    const win = carries && s.tryingToConceive ? fertileInfo(s, c, day) : null;
     const testRes = c.lastTestResult;
 
     let extraRows = '';
@@ -649,7 +656,7 @@ function cycleCardHtml(who, c, tr) {
         ? `После родов · ${pp.days} дн.`
         : delay > 0
             ? `Задержка ${delay} дн.`
-            : `День ${day}/28 · ${phase.name}`;
+            : `День ${day}/${maxLen} · ${phase.name}`;
 
     return `<details class="repro">
         <summary><div class="repro-header">
@@ -1037,7 +1044,7 @@ export function showQuickBar() {
                 ${(!isTracked('user')) ? '' : `<div class="rp-quick-cycle">
                     <span class="rp-quick-lbl">День цикла</span>
                     <button class="rp-quick-step" data-d="-1"><i class="fa-solid fa-minus"></i></button>
-                    <input type="number" id="rp-quick-cycleday" min="1" max="28" value="${day}" class="text_pole">
+                    <input type="number" id="rp-quick-cycleday" min="1" max="120" value="${day}" class="text_pole">
                     <button class="rp-quick-step" data-d="1"><i class="fa-solid fa-plus"></i></button>
                     <button class="rp-quick-set" id="rp-quick-setcycle">Установить</button>
                 </div>`}
@@ -1087,20 +1094,21 @@ export function showQuickBar() {
     });
 
     const applyCycle = (v) => {
-        v = Math.max(1, Math.min(28, parseInt(v) || 1));
+        v = Math.max(1, Math.min(cycleLen(getPregnancyData(), getSettings()), parseInt(v) || 1));
         overlay.find('#rp-quick-cycleday').val(v);
         setManualCycleDay('user', v);
         saveSettingsDebounced();
         setTimeout(() => { updatePromptInjection(); syncUI(); }, 30);
         // Обновляем строку статуса
         const ph = getPhaseInfo(v);
-        overlay.find('.rp-quick-status').html(`Цикл: день ${v}/28 · <span style="color:${ph.color}">${ph.name}</span>`);
+        overlay.find('.rp-quick-status').html(`Цикл: день ${v}/${cycleLen(getPregnancyData(), getSettings())} · <span style="color:${ph.color}">${ph.name}</span>`);
         showNotification(`День цикла: ${v}`, 'success');
     };
     overlay.find('.rp-quick-step').on('click', function() {
         const cur = parseInt(overlay.find('#rp-quick-cycleday').val()) || 1;
         let nv = cur + parseInt($(this).attr('data-d'));
-        if (nv < 1) nv = 28; if (nv > 28) nv = 1;
+        const maxD = cycleLen(getPregnancyData(), getSettings());
+        if (nv < 1) nv = maxD; if (nv > maxD) nv = 1;
         overlay.find('#rp-quick-cycleday').val(nv);
     });
     overlay.find('#rp-quick-setcycle').on('click', () => applyCycle(overlay.find('#rp-quick-cycleday').val()));
@@ -1198,7 +1206,7 @@ export function syncUI() {
 
     // ── Носители / вселенная ──
     const roleSettings = el('repro-role-settings');
-    if (roleSettings) roleSettings.style.display = isOmegaverse(s) ? '' : 'none';
+    if (roleSettings) roleSettings.style.display = isAbo(s) ? '' : 'none';
     for (const who of ['user','char']) {
         const roleSel = el(`repro-${who}-desig`);
         if (roleSel) roleSel.value = designationOf(s, who);
@@ -1215,7 +1223,11 @@ export function syncUI() {
     const carrierSel = el('repro-carrier-mode');
     if (carrierSel) carrierSel.value = s.carrierMode || 'user';
     const uniSel = el('repro-universe');
-    if (uniSel) uniSel.value = s.universe || 'normal';
+    if (uniSel) uniSel.value = getUniverse(s).id;
+    const sizeRow = el('repro-size-row');
+    if (sizeRow) sizeRow.style.display = getUniverse(s).litters ? '' : 'none';
+    const sizeSel = el('repro-carrier-size');
+    if (sizeSel) sizeSel.value = s.carrierSize === 'large' ? 'large' : 'small';
     const cycInfo = el('repro-currentcycle');
     const cycRow = el('repro-cycle-row');
     if (cycInfo) cycInfo.style.display = isTracked('user') ? '' : 'none';
@@ -1524,9 +1536,18 @@ export function setupUI() {
             </div>
             <div style="display:flex;gap:4px;align-items:center">
                 <label for="repro-universe">Вселенная:</label>
-                <select id="repro-universe" class="text_pole" title="В омегаверсе течка совпадает с овуляторной фазой цикла">
-                    <option value="normal">Обычная</option>
+                <select id="repro-universe" class="text_pole" title="Вселенная задаёт правила: цикл, срок, число плодов. При смене подставляются значения по умолчанию для этой вселенной.">
+                    <option value="normal">Обычный мир</option>
                     <option value="omegaverse">Омегаверс</option>
+                    <option value="ds">Д/с</option>
+                    <option value="beastmen">Зверолюди</option>
+                </select>
+            </div>
+            <div class="rp-setting-row" id="repro-size-row" style="display:none">
+                <label for="repro-carrier-size">Размер носителя:</label>
+                <select id="repro-carrier-size" class="text_pole" title="От роста зависит размер помёта">
+                    <option value="small">Малый (150–160 см), помёт 2–3</option>
+                    <option value="large">Крупный, помёт 1–2</option>
                 </select>
             </div>
             <div id="repro-role-settings">
@@ -1536,7 +1557,7 @@ export function setupUI() {
             <label class="checkbox_label"><input type="checkbox" id="repro-menstruation-enabled"><span>Месячные включены</span></label>
             <div id="repro-partner-cycle-row">
                 <span id="repro-partner-cycle-info"></span>
-                <input id="repro-partner-cycle-day" class="text_pole" type="number" min="1" max="28">
+                <input id="repro-partner-cycle-day" class="text_pole" type="number" min="1" max="120">
                 <button id="repro-partner-cycle-set" class="menu_button">Установить день бота</button>
             </div>
             <hr>
@@ -1579,7 +1600,7 @@ export function setupUI() {
             <div id="repro-currentcycle" class="rp-cycle-info"></div>
             <div id="repro-cycle-row" style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">День цикла:</span>
-                <input type="number" id="repro-cycleday" min="1" max="28" value="${getCycleDay()}" class="text_pole" style="width:45px">
+                <input type="number" id="repro-cycleday" min="1" max="120" value="${getCycleDay()}" class="text_pole" style="width:45px">
                 <button id="repro-setcycle" class="menu_button">${ic('fa-check')}</button>
             </div>
             <hr>
@@ -1798,7 +1819,24 @@ export function setupUI() {
             refreshAll();
         });
         $('#repro-carrier-mode').on('change', function() { getSettings().carrierMode = this.value; getPregnancyData(); getPartnerData(); refreshAll(); });
-        $('#repro-universe').on('change', function() { getSettings().universe = this.value; refreshAll(); });
+        $('#repro-universe').on('change', function() {
+            const s = getSettings();
+            s.universe = this.value;
+            // Подставляем значения по умолчанию новой вселенной и пересобираем цикл.
+            const un = getUniverse(s);
+            s.pregnancyDuration = un.term;
+            s.twinsChance = un.twins;
+            s.tripletsChance = un.triplets;
+            resetCycleForUniverse(getPregnancyData(), s);
+            resetCycleForUniverse(getPartnerData(), s);
+            saveSettingsDebounced();
+            updatePromptInjection();
+            refreshAll();
+        });
+        $('#repro-carrier-size').on('change', function() {
+            getSettings().carrierSize = this.value === 'large' ? 'large' : 'small';
+            saveSettingsDebounced();
+        });
         const applyPartnerCycle = () => {
             setManualCycleDay('char', $('#repro-partner-cycle-day').val());
             refreshAll();
@@ -1833,7 +1871,7 @@ export function setupUI() {
 
         const applyManualCycle = (v) => {
             if (warnIfNoChat()) return;
-            v = Math.max(1, Math.min(28, parseInt(v) || 14));
+            v = Math.max(1, Math.min(cycleLen(getPregnancyData(), getSettings()), parseInt(v) || 14));
             $('#repro-cycleday').val(v);
             setManualCycleDay('user', v);
 

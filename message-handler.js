@@ -7,6 +7,7 @@ import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnan
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, getPostpartum, canTriggerBirth } from './pregnancy.js';
 import { getPartnerData, carrierName, isTracked, resolveNameMacros } from './state.js';
 import { hasMenstrualCycle, hasCycle, cyclePhase } from './omegaverse.js';
+import { getUniverse, advanceCycleDay, phaseAt, cycleLen } from './universe.js';
 import { updateBabyCare } from './baby-care.js';
 import { DISRUPTIONS, disruptionShift } from './cycle-realism.js';
 import { updatePromptInjection } from './prompts.js';
@@ -706,7 +707,7 @@ function advanceTime(s, p, daysPassed) {
                 const pp = getPostpartum(c, p);
                 if (!pp || pp.cycleReturned) {
                     c._dynamic = {};
-                    c.cycleDay = ((c.cycleDay || 1) - 1 + daysPassed) % 28 + 1;
+                    c.cycleDay = advanceCycleDay(c, s, c.cycleDay || 1, daysPassed);
                     changed = true;
                 }
             }
@@ -728,14 +729,20 @@ function advanceTime(s, p, daysPassed) {
         const oldDay = getCycleDay();
         // Сбой цикла (стресс, болезнь) растягивает ТЕКУЩИЙ цикл: месячные приходят позже.
         // Как только цикл закрылся, растяжка сгорает — следующий снова обычный.
-        const shift = Math.max(0, parseInt(p._cycleShift) || 0);
-        const cycleLen = 28 + shift;
-        let newDay = oldDay + daysPassed;
-        if (newDay > cycleLen) {
-            newDay = ((newDay - cycleLen - 1) % 28) + 1;
-            if (shift) p._cycleShift = 0;
+        const uni = getUniverse(s);
+        let newDay;
+        if (uni.kind !== 'menstrual') {
+            newDay = advanceCycleDay(p, s, oldDay, daysPassed);
+        } else {
+            const shift = Math.max(0, parseInt(p._cycleShift) || 0);
+            const lenNow = 28 + shift;
+            newDay = oldDay + daysPassed;
+            if (newDay > lenNow) {
+                newDay = ((newDay - lenNow - 1) % 28) + 1;
+                if (shift) p._cycleShift = 0;
+            }
+            if (newDay > 28 && !shift) newDay = ((newDay - 1) % 28) + 1;
         }
-        if (newDay > 28 && !shift) newDay = ((newDay - 1) % 28) + 1;
         p._dynamic = {};
         setCycleDay(newDay, true, false);
         changed = true;
@@ -745,8 +752,15 @@ function advanceTime(s, p, daysPassed) {
             if (hasMenstrualCycle(s, 'user') && s.menstruationEnabled !== false && oldDay > 5 && newDay <= 5) {
                 showNotification('<i class="fa-solid fa-droplet"></i> Менструация началась', 'info');
             }
-            if (oldDay < 12 && newDay >= 12 && newDay <= 16) {
-                showNotification(`<i class="fa-solid fa-fire"></i> Началась фаза: ${cyclePhase(s, 'user', newDay).name}`, 'warning');
+            if (uni.kind === 'menstrual') {
+                if (oldDay < 12 && newDay >= 12 && newDay <= 16) {
+                    showNotification(`<i class="fa-solid fa-fire"></i> Началась фаза: ${cyclePhase(s, 'user', newDay).name}`, 'warning');
+                }
+            } else {
+                const before = phaseAt(p, uni, oldDay), after = phaseAt(p, uni, newDay);
+                if (after.def.active && (!before.def.active || newDay < oldDay)) {
+                    showNotification(`<i class="fa-solid fa-fire"></i> Началась фаза: ${cyclePhase(s, 'user', newDay).name}`, 'warning');
+                }
             }
         }
     }
@@ -1001,7 +1015,7 @@ export function setManualCycleDay(who, day) {
     if (!['user','char'].includes(who)) return false;
     const p = getPregnancyData(), c = who === 'char' ? getPartnerData() : p;
     if (c.isPregnant) return false;
-    const value = Math.max(1, Math.min(28, parseInt(day) || 1));
+    const value = Math.max(1, Math.min(cycleLen(c, getSettings()), parseInt(day) || 1));
     c.cycleDay = value;
     c._cycleShift = 0;
     c._dynamic = {};

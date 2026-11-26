@@ -212,13 +212,13 @@ export function formatFetusCount(count, style = 'short', lang = 'ru') {
     const L = lang === 'en';
     if (style === 'instrumental') {
         return L
-            ? (count === 1 ? 'single fetus' : count === 2 ? 'twins' : 'triplets')
-            : (count === 1 ? 'одним плодом' : count === 2 ? 'двойней' : 'тройней');
+            ? (count === 1 ? 'single fetus' : count === 2 ? 'twins' : count === 3 ? 'triplets' : `${count} fetuses`)
+            : (count === 1 ? 'одним плодом' : count === 2 ? 'двойней' : count === 3 ? 'тройней' : `${count} плодами`);
     }
     if (style === 'full') {
         return L
-            ? (count === 1 ? '1 fetus' : count === 2 ? '2 fetuses (twins)' : '3 fetuses (triplets)')
-            : (count === 1 ? '1 плод' : count === 2 ? '2 плода (двойня)' : '3 плода (тройня)');
+            ? (count === 1 ? '1 fetus' : count === 2 ? '2 fetuses (twins)' : count === 3 ? '3 fetuses (triplets)' : `${count} fetuses`)
+            : (count === 1 ? '1 плод' : count === 2 ? '2 плода (двойня)' : count === 3 ? '3 плода (тройня)' : `${count} плода`);
     }
     return L
         ? (count === 1 ? '1 fetus' : count === 2 ? 'Twins' : 'Triplets')

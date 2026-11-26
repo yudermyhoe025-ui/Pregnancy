@@ -6,7 +6,8 @@ import { reportError } from './diagnostics.js';
 import { setExtensionPrompt, extension_prompts, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
 import { getSettings, getPregnancyData, getPartnerData, getCycleDay, isTracked, getContraception } from './state.js';
-import { isOmegaverse, hasMenstrualCycle, hasAnyTracking, canCarry, hasCycle, designationOf, cyclePhase } from './omegaverse.js';
+import { isOmegaverse, isAbo, hasMenstrualCycle, hasAnyTracking, canCarry, hasCycle, designationOf, cyclePhase, fertileInfo } from './omegaverse.js';
+import { getUniverse, phaseAt, cycleLen } from './universe.js';
 import { pregnancyIsKnown, getPostpartum, monthsTrying } from './pregnancy.js';
 import { fertileWindow, conceptionStruggle } from './fertility.js';
 import { getFlow, getHygieneState, realismPromptLine, hoursBetween } from './cycle-realism.js';
@@ -40,6 +41,9 @@ function carrierCycleLine(who, s) {
     const pp = getPostpartum(c, getPregnancyData());
     if (pp && !pp.cycleReturned) return `${nm}: postpartum recovery; cycle paused`;
     const day = who === 'char' ? (c.cycleDay || 1) : getCycleDay();
+    if (getUniverse(s).kind !== 'menstrual') {
+        return `${nm}: ${cyclePhase(s, who, day, 'en').name}, cycle day ${day}/${cycleLen(c, s)}`;
+    }
     return `${nm}: ${day > 28 ? `period delayed by ${day - 28} days` : `cycle day ${day}/28`} (${cyclePhase(s, who, day, 'en').name})`;
 }
 
@@ -77,14 +81,21 @@ export function getBasePrompt() {
     if (!s.isEnabled) return '';
     const active = ['user', 'char'].filter(isTracked);
     if (!active.length && !p.hasBaby) return '';
-    let b = `[TRACKER] Universe: ${isOmegaverse(s) ? 'OMEGAVERSE; omega has heat, alpha has rut, beta has neither. Active phase is days 12–16 of the same cycle' : 'NORMAL; ordinary ovulation, no omegaverse heat or rut'}. Tracking: ${active.join(', ') || 'none'}. Carriers: ${active.filter(w => canCarry(s, w)).join(', ') || 'none'} (explicit choice; never infer from anatomy or A/B/O). One 28-day cycle each.\n`;
+    const uniDesc = {
+        normal: 'NORMAL; ordinary ovulation, no omegaverse heat or rut',
+        omegaverse: 'OMEGAVERSE; omega has heat, alpha has rut, beta has neither. The active phase is the estrus phase of a roughly monthly four-phase cycle (proestrus, estrus, metestrus, diestrus); there is no menstruation',
+        ds: 'D/S; submissive has heat, dominant has hunt, roughly every three months for up to 5 days; no menstruation',
+        beastmen: 'BEASTMEN; no cycle phases; a mating season of 3-4 days roughly every three months; litters of several offspring are normal; no menstruation',
+    }[getUniverse(s).id];
+    const isMens = getUniverse(s).kind === 'menstrual';
+    let b = `[TRACKER] Universe: ${uniDesc}. Tracking: ${active.join(', ') || 'none'}. Carriers: ${active.filter(w => canCarry(s, w)).join(', ') || 'none'} (explicit choice; never infer from anatomy or A/B/O). ${isMens ? 'One 28-day cycle each.' : 'One cycle per carrier.'}\n`;
     if (p.rpDate) b += `RP clock: ${new Date(p.rpDate).toLocaleString('en-GB', {hour12:false})}. Advance only by time actually elapsed in the scene; do not skip to a due date.\n`;
     b += 'Identity: user={{user}} (player), char={{char}} (bot). RP_STATUS root describes ONLY user; partner describes ONLY char, regardless of narrator or pronouns. Never exchange their actions or body states. If uncertain, omit the field.\n';
-    if (isOmegaverse(s)) b += active.map(w => `${w}=${designationOf(s,w)}`).join(', ') + '.\n';
+    if (isAbo(s)) b += active.map(w => `${w}=${designationOf(s,w)}`).join(', ') + '.\n';
     b += active.map(w => carrierCycleLine(w, s)).join(' | ') + '\n';
-    if (s.menstruationEnabled === false) b += 'Menstrual bleeding is disabled; days 1–11 are follicular. Keep ovulation/heat and the rest of the cycle. No menstrual hygiene reminders.\n';
-    b += cycleScenePrompt(s) + realismBlock(s, p);
-    if (s.menstruationEnabled !== false) {
+    if (isMens && s.menstruationEnabled === false) b += 'Menstrual bleeding is disabled; days 1–11 are follicular. Keep ovulation/heat and the rest of the cycle. No menstrual hygiene reminders.\n';
+    b += cycleScenePrompt(s) + (isMens ? realismBlock(s, p) : '');
+    if (isMens && s.menstruationEnabled !== false) {
         for (const who of active) {
             const c = who === 'char' ? getPartnerData() : p;
             const pp = getPostpartum(c, p);
@@ -202,7 +213,7 @@ function knowledgePrompt(s) {
 // ─── Режим «планируем» + сложности с зачатием ───
 function tryingBlock(s, p) {
     if (!s.tryingToConceive || p.isPregnant) return '';
-    const w = fertileWindow(getCycleDay(), 28);
+    const w = fertileInfo(s, getPregnancyData(), getCycleDay());
     const months = monthsTrying(p);
     const struggle = conceptionStruggle(months);
 
@@ -271,8 +282,12 @@ function cycleScenePrompt(s) {
         const pp = getPostpartum(c,getPregnancyData());
         if (c.isPregnant || (pp && !pp.cycleReturned)) continue;
         const d = who === 'char' ? c.cycleDay || 1 : getCycleDay();
-        if (d <= 5 && canCarry(s, who) && s.menstruationEnabled !== false) b += `${who}: active MENSTRUATION. Account for observable blood/hygiene/discomfort during intimacy; react naturally, check comfort without deciding for the player. No telepathic knowledge away from observable signs.\n`;
-        else if (d >= 12 && d <=16 && isOmegaverse(s) && designationOf(s,who) !== 'beta') b += `${who}: ${designationOf(s,who) === 'alpha' ? 'rut' : 'heat'} now; reflect scene-supported signs, no forced actions.\n`;
+        const uni = getUniverse(s);
+        if (uni.kind === 'menstrual' && d <= 5 && canCarry(s, who) && s.menstruationEnabled !== false) b += `${who}: active MENSTRUATION. Account for observable blood/hygiene/discomfort during intimacy; react naturally, check comfort without deciding for the player. No telepathic knowledge away from observable signs.\n`;
+        else if (uni.kind === 'phased' && phaseAt(c, uni, d).def.active && (uni.id === 'beastmen' || designationOf(s,who) !== 'beta')) {
+            if (uni.id === 'beastmen') b += `${who}: mating season now; heightened need for closeness with their human, behaviour follows their species (cat types clingy and selective, dog types overexcited with lowered inhibitions; wild individuals more intense); reflect scene-supported signs, no forced actions.\n`;
+            else b += `${who}: ${designationOf(s,who) === 'alpha' ? (uni.id === 'ds' ? 'hunt' : 'rut') : 'heat'} now; reflect scene-supported signs, no forced actions.\n`;
+        }
         else b += `${who}: no active heat or menstruation.\n`;
     }
     return b ? b + 'Keep narration and status consistent with this phase and current scene.\n' : '';

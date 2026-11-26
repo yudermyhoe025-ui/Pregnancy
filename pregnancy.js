@@ -6,7 +6,8 @@ import { snapshotState } from './snapshots.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { CHANCES } from './config.js';
 import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, isManualCycleProtected, carrierName, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
-import { canCarry, hasMenstrualCycle } from './omegaverse.js';
+import { canCarry, hasMenstrualCycle, fertilityMod } from './omegaverse.js';
+import { getUniverse, advanceCycleDay, cycleLen, rollLitter } from './universe.js';
 import { rollTest, isObvious, postpartumState, fertileWindow, inheritLooks, conceptionStruggle, missedDays } from './fertility.js';
 import { roll, getCycleModifier, formatSexIcons, formatFetusCount, calculateWeeksFromDates, getHealthInfo, rollPlannedComplications } from './helpers.js';
 import { calculateConceptionDate } from './date-parser.js';
@@ -103,7 +104,7 @@ export function applyScanResult(result) {
                     const daysPassed = Math.floor((newTime - oldTime) / 86400000);
                     if (daysPassed > 0 && !p.isPregnant) {
                         const oldCycleDay = getCycleDay();
-                        const newCycleDay = ((oldCycleDay - 1 + daysPassed) % 28) + 1;
+                        const newCycleDay = advanceCycleDay(p, getSettings(), oldCycleDay, daysPassed);
                         setCycleDay(newCycleDay);
                     }
                 }
@@ -143,7 +144,7 @@ export function applyScanResult(result) {
     if (result.cycle_day !== null && result.cycle_day !== undefined && (result._source === 'manual' || !isManualCycleProtected('user'))) {
         const day = parseInt(result.cycle_day);
         const current = getCycleDay();
-        if (day >= 1 && day <= 28 && day !== current) {
+        if (day >= 1 && day <= cycleLen(getPregnancyData(), getSettings()) && day !== current) {
             setCycleDay(day);
             updated = true;
         }
@@ -489,7 +490,7 @@ export function checkConception() {
 
     const currentCycleDay = getCycleDay();
     // Fertility comes from the same cycle day used by UI and prompts.
-    let cycleModifier = hasMenstrualCycle(s, 'user') ? getCycleModifier(currentCycleDay) : 1;
+    let cycleModifier = fertilityMod(s, 'user', p, currentCycleDay);
 
     let chance = Math.max(0, Math.min(100, Math.round(CHANCES.base * cycleModifier)));
 
@@ -543,7 +544,9 @@ export function checkConception() {
         const tripletsChance = s.tripletsChance || 0.1;
         const multiplesRoll = roll(1000) / 10;
 
-        if (multiplesRoll <= tripletsChance) {
+        if (getUniverse(s).litters) {
+            p.fetusCount = rollLitter(s.carrierSize);
+        } else if (multiplesRoll <= tripletsChance) {
             p.fetusCount = 3;
         } else if (multiplesRoll <= twinsChance) {
             p.fetusCount = 2;
@@ -1043,7 +1046,7 @@ export function partnerCheckConception() {
     const p = getPregnancyData();
 
     s.totalChecks++;
-    let cycleModifier = hasMenstrualCycle(s, 'char') ? getCycleModifier(c.cycleDay || 1) : 1;
+    let cycleModifier = fertilityMod(s, 'char', c, c.cycleDay || 1);
 
     let chance = Math.max(0, Math.min(100, Math.round(CHANCES.base * cycleModifier)));
 
@@ -1070,7 +1073,7 @@ export function partnerCheckConception() {
         c.healthStatus = 'normal';
         s.totalConceptions++;
         const mult = roll(1000) / 10;
-        c.fetusCount = mult <= (s.tripletsChance || 0.1) ? 3 : mult <= (s.twinsChance || 3) ? 2 : 1;
+        c.fetusCount = getUniverse(s).litters ? rollLitter(s.carrierSize) : mult <= (s.tripletsChance || 0.1) ? 3 : mult <= (s.twinsChance || 3) ? 2 : 1;
         c.fetusSex = [];
         for (let i = 0; i < c.fetusCount; i++) c.fetusSex.push(roll(2) === 1 ? 'M' : 'F');
         c.fetusSexRevealed = false;
