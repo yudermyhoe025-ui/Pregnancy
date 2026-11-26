@@ -583,7 +583,7 @@ export function messageRaw(msg) {
 
 // Наши технические комментарии — перечисляем поимённо, чтобы не задеть
 // теги других расширений (телефон и т.п.) в таких же HTML-комментариях.
-export const REPRO_TAG_RE = /<!--\s*\[(?:RP_STATUS|RP_DATE|CONCEPTION_CHECK|BIRTH|MISCARRIAGE|ABORTION|SEX_REVEAL|CYCLE_DAY|PREGNANCY_STATE|BABY_TRAITS)(?::CHAR)?[\s\S]*?-->/gi;
+export const REPRO_TAG_RE = /<!--\s*\[(?:RP_STATUS|RP_DATE|CONCEPTION_CHECK|BIRTH|MISCARRIAGE|ABORTION|SEX_REVEAL|CYCLE_DAY|PREGNANCY_STATE|BABY_TRAITS|PRESENCE|RISK_EVENT)(?::CHAR)?[\s\S]*?-->/gi;
 
 export function hasReproTags(text) {
     REPRO_TAG_RE.lastIndex = 0;

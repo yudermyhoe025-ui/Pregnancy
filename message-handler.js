@@ -5,7 +5,8 @@
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId } from './state.js';
 import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink, stripReproTags, hasReproTags, messageRaw, confirmedFetusCount } from './scanner.js';
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, getPostpartum, canTriggerBirth } from './pregnancy.js';
-import { getPartnerData, carrierName, isTracked, resolveNameMacros } from './state.js';
+import { getPartnerData, carrierName, isTracked, resolveNameMacros, getCarriers } from './state.js';
+import { riskTick, applyEvent, refreshStage, ensureRiskFields, overdueDays, parseRiskTags, presenceStrength, STAGE_NAMES, EVENT_KINDS } from './risk.js';
 import { hasMenstrualCycle, hasCycle, cyclePhase } from './omegaverse.js';
 import { getUniverse, advanceCycleDay, phaseAt, cycleLen } from './universe.js';
 import { updateBabyCare } from './baby-care.js';
@@ -219,6 +220,7 @@ function runScan() {
 
     // 0) RP_DATE tag: always extract date and advance time
     let dateAdvanced = processDateTag(text);
+    processRiskTags(text, positionId);
 
     // 1) Try tag-based detection (if model added tags)
     const freshStatus = scanStatusTag(text);
@@ -1061,6 +1063,114 @@ function dateScanOpts(s, p) {
     return { loose: s.dateSource === 'chat', customRegex: s.dateRegex || '', ref: p?.rpDate || null };
 }
 
+// ─── Риск и присутствие партнёра ───
+function riskOpts(s, p, c, extra = {}) {
+    const uni = getUniverse(s);
+    const termW = s.pregnancyDuration || 40;
+    return {
+        mode: s.consequenceMode || 'mild',
+        strength: presenceStrength(s, uni),
+        litters: !!uni.litters,
+        fetusCount: c.fetusCount || 1,
+        progress: (c.pregnancyWeeks || 0) / termW,
+        week: c.pregnancyWeeks || 0,
+        rp: p.rpDate || null,
+        nowMs: p.rpDate ? Date.parse(p.rpDate) : 0,
+        ...extra,
+    };
+}
+
+function notifyStage(s, who, r) {
+    if (!r || !r.changed || r.stageTo <= r.stageFrom || !s.showNotifications) return;
+    const icon = r.stageTo >= 3 ? '<i class="fa-solid fa-circle-exclamation"></i>' : '<i class="fa-solid fa-triangle-exclamation"></i>';
+    showNotification(`${icon} ${carrierName(who)}: ${STAGE_NAMES[r.stageTo]}`, r.stageTo >= 3 ? 'warning' : 'info');
+}
+
+// Ход времени: двигаем риск у всех отслеживаемых беременных носителей.
+function runRiskTick(s, p, hours, nowMs) {
+    if ((s.consequenceMode || 'mild') === 'off') return false;
+    let changed = false;
+    const termW = s.pregnancyDuration || 40;
+    for (const { who, data: c } of getCarriers()) {
+        ensureRiskFields(c);
+        if (c.lastDoctorVisitRpDate && c._riskVisitSeen !== c.lastDoctorVisitRpDate) {
+            applyEvent(c, 'visit', riskOpts(s, p, c));
+            c._riskVisitSeen = c.lastDoctorVisitRpDate;
+            changed = true;
+        }
+        const od = overdueDays(c, nowMs, termW) > 0;
+        const r = riskTick(c, riskOpts(s, p, c, { hours, overdue: od, nowMs }));
+        if (r.changed) changed = true;
+        notifyStage(s, who, r);
+    }
+    return changed;
+}
+
+// Теги присутствия и событий из ответа модели.
+export function processRiskTags(text, positionId) {
+    if (!text) return false;
+    const s = getSettings();
+    if ((s.consequenceMode || 'mild') === 'off') return false;
+    const tags = parseRiskTags(text);
+    if (!tags.presence.length && !tags.events.length) return false;
+    const p = getPregnancyData();
+    // Ключ хранится в состоянии: при откате состояния (свайп) событие применится заново.
+    const key = `${positionId}:${simpleHash(JSON.stringify(tags))}`;
+    if (p._riskKey === key) return false;
+    p._riskKey = key;
+    let changed = false;
+    for (const t of tags.presence) {
+        if (!isTracked(t.who)) continue;
+        const c = t.who === 'char' ? getPartnerData() : p;
+        ensureRiskFields(c);
+        c.presenceState = t.state;
+        if (t.state === 'present') c.awayHours = 0;
+        changed = true;
+    }
+    for (const t of tags.events) {
+        if (!isTracked(t.who)) continue;
+        const c = t.who === 'char' ? getPartnerData() : p;
+        ensureRiskFields(c);
+        applyEvent(c, t.kind, riskOpts(s, p, c));
+        notifyStage(s, t.who, refreshStage(c, riskOpts(s, p, c)));
+        changed = true;
+    }
+    if (changed) { saveSettingsDebounced(); syncUI(); updatePromptInjection(); setTimeout(renderInfoblock, 500); }
+    return changed;
+}
+
+// Ручные действия из панели.
+export function setPresence(who, state) {
+    if (!['user', 'char'].includes(who) || !['present', 'away'].includes(state)) return false;
+    const s = getSettings(), p = getPregnancyData();
+    const c = who === 'char' ? getPartnerData() : p;
+    ensureRiskFields(c);
+    c.presenceState = state;
+    if (state === 'present') c.awayHours = 0;
+    refreshRegenSnapshot();
+    saveSettingsDebounced(); syncUI(); updatePromptInjection(); setTimeout(renderInfoblock, 200);
+    return true;
+}
+
+export function applyRiskEvent(who, kind) {
+    if (!['user', 'char'].includes(who) || !EVENT_KINDS[kind]) return false;
+    const s = getSettings(), p = getPregnancyData();
+    const c = who === 'char' ? getPartnerData() : p;
+    ensureRiskFields(c);
+    applyEvent(c, kind, riskOpts(s, p, c));
+    notifyStage(s, who, refreshStage(c, riskOpts(s, p, c)));
+    refreshRegenSnapshot();
+    saveSettingsDebounced(); syncUI(); updatePromptInjection(); setTimeout(renderInfoblock, 200);
+    return true;
+}
+
+export function clearPendingRiskEvent(who) {
+    const c = who === 'char' ? getPartnerData() : getPregnancyData();
+    c._pendingEvent = null;
+    refreshRegenSnapshot();
+    saveSettingsDebounced(); syncUI(); updatePromptInjection();
+}
+
 export function processDateTag(text) {
     if (!text) return false;
     text = stripThink(text);
@@ -1144,6 +1254,9 @@ export function processDateTag(text) {
     if (prevRaw) {
         const prev = new Date(prevRaw);
         const diffMs = rpDate.getTime() - prev.getTime();
+        if (diffMs > 0 && diffMs <= 365 * 86400000) {
+            if (runRiskTick(s, p, diffMs / 3600000, rpDate.getTime())) { saveSettingsDebounced(); syncUI(); updatePromptInjection(); setTimeout(renderInfoblock, 500); }
+        }
         // Cycle days follow RP calendar dates, not rounded partial days.
         const calendarDay = d => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000;
         const diffDays = calendarDay(rpDate) - calendarDay(prev);

@@ -242,7 +242,9 @@ jQuery(async () => {
                      msg.mes.includes('[RP_STATUS:') ||
                      msg.mes.includes('[RP_DATE:') ||
                      msg.mes.includes('[PREGNANCY_STATE:') ||
-                     msg.mes.includes('[BABY_TRAITS:'))
+                     msg.mes.includes('[BABY_TRAITS:') ||
+                     msg.mes.includes('[PRESENCE:') ||
+                     msg.mes.includes('[RISK_EVENT:'))
                 ) {
                     // Если включён debug режим — оставляем теги в чате для отладки
                     const s = getSettings();

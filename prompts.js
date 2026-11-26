@@ -8,6 +8,7 @@ import { extensionName } from './config.js';
 import { getSettings, getPregnancyData, getPartnerData, getCycleDay, isTracked, getContraception } from './state.js';
 import { isOmegaverse, isAbo, hasMenstrualCycle, hasAnyTracking, canCarry, hasCycle, designationOf, cyclePhase, fertileInfo } from './omegaverse.js';
 import { getUniverse, phaseAt, cycleLen } from './universe.js';
+import { ensureRiskFields, dominantCause, presenceStrength, STAGE_NAMES } from './risk.js';
 import { pregnancyIsKnown, getPostpartum, monthsTrying } from './pregnancy.js';
 import { fertileWindow, conceptionStruggle } from './fertility.js';
 import { getFlow, getHygieneState, realismPromptLine, hoursBetween } from './cycle-realism.js';
@@ -94,7 +95,7 @@ export function getBasePrompt() {
     if (isAbo(s)) b += active.map(w => `${w}=${designationOf(s,w)}`).join(', ') + '.\n';
     b += active.map(w => carrierCycleLine(w, s)).join(' | ') + '\n';
     if (isMens && s.menstruationEnabled === false) b += 'Menstrual bleeding is disabled; days 1–11 are follicular. Keep ovulation/heat and the rest of the cycle. No menstrual hygiene reminders.\n';
-    b += cycleScenePrompt(s) + (isMens ? realismBlock(s, p) : '');
+    b += cycleScenePrompt(s) + (isMens ? realismBlock(s, p) : '') + riskBlock(s, p);
     if (isMens && s.menstruationEnabled !== false) {
         for (const who of active) {
             const c = who === 'char' ? getPartnerData() : p;
@@ -210,6 +211,51 @@ function knowledgePrompt(s) {
     }
     return b + 'Actual discovery: add "pregnancy_known":true to RP_STATUS (nested in partner for char). Actual test: "test_result":"positive|faint|negative". Missing records do not establish who knows or was told.\n';
 }
+
+// ─── Самочувствие носителя: накопленный риск, присутствие партнёра, обязательные события ───
+const RISK_SIGNS = {
+    presence_strong: ['unease, restlessness, faint nausea easily mistaken for morning sickness, light sleep', 'insomnia, trembling hands, nausea, poor appetite, clinging to the partner\'s scent and belongings', 'fever, refusing food, fainting spells, labor-like cramps'],
+    presence_soft: ['low mood, restlessness, seeking attention and closeness', 'withdrawn, tired, poor appetite, tension', 'exhausted, dizzy, cramps'],
+    injury: ['localized soreness', 'pain, spotting', 'severe pain and bleeding'],
+    stress: ['tension headaches, poor sleep', 'dizziness, palpitations, cramps', 'severe cramps, faintness'],
+    neglect: ['vague worry about ignored advice', 'untreated symptoms getting worse', 'acute symptoms needing urgent care'],
+    overdue: ['vague worry about missed check-ups', 'untreated symptoms getting worse', 'acute symptoms needing urgent care'],
+};
+const CAUSE_EN = { presence: 'lack of the partner\'s presence', injury: 'injury', stress: 'stress and overexertion', neglect: 'ignored medical advice', overdue: 'missed check-ups' };
+
+function riskBlock(s, p) {
+    const mode = s.consequenceMode || 'mild';
+    if (mode === 'off') return '';
+    const uni = getUniverse(s);
+    const strength = presenceStrength(s, uni);
+    let b = '', any = false;
+    for (const who of ['user', 'char']) {
+        if (!isTracked(who)) continue;
+        const c = who === 'char' ? getPartnerData() : p;
+        if (!c.isPregnant) continue;
+        ensureRiskFields(c);
+        any = true;
+        const nm = who === 'char' ? '{{char}}' : '{{user}}';
+        const stage = c.riskStage || 0;
+        const cause = dominantCause(c);
+        if (stage >= 1 && cause) {
+            const key = cause === 'presence' ? (strength === 'strong' ? 'presence_strong' : 'presence_soft') : cause;
+            const sign = (RISK_SIGNS[key] || RISK_SIGNS.stress)[Math.min(stage, 3) - 1];
+            b += `${nm}: strain level "${STAGE_NAMES[stage]}" caused by ${CAUSE_EN[cause] || cause}. Show matching signs in the scene: ${sign}. Never state numbers or levels.\n`;
+        }
+        if (strength !== 'off' && c.presenceState === 'away') b += `${nm}: the partner is away (about ${Math.round(c.awayHours || 0)}h).\n`;
+        const ev = c._pendingEvent;
+        if (ev && mode !== 'off') {
+            if (ev.type === 'preterm_labor') b += `${nm}: REQUIRED EVENT: preterm labor begins in this reply. Narrate it; write the BIRTH tag only when the birth actually happens in the scene.\n`;
+            else if (ev.type === 'loss') b += `${nm}: REQUIRED EVENT: the pregnancy is lost. Narrate with care; add <!-- [MISCARRIAGE] --> only once the loss is confirmed in the scene.\n`;
+            else b += `${nm}: REQUIRED EVENT: the condition now needs hospital care or strict bed rest; narrate it.\n`;
+        }
+    }
+    if (!any) return '';
+    b += 'When the scene shows a partner leaving or arriving add <!-- [PRESENCE:user:away] --> or <!-- [PRESENCE:char:present] --> (the carrier named is the one whose partner moves). For something that actually happened to a pregnant carrier in this reply add <!-- [RISK_EVENT:user:injury:light|medium|heavy] -->, or stress, overwork, neglect (ignored medical advice), care (rest and care). One tag per event, never for plans or hypotheticals.\n';
+    return '[WELLBEING]\n' + b;
+}
+
 // ─── Режим «планируем» + сложности с зачатием ───
 function tryingBlock(s, p) {
     if (!s.tryingToConceive || p.isPregnant) return '';

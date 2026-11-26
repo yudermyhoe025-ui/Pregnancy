@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════
 
 export const extensionName = 'reproductive-system';
-export const EXT_VERSION = '3.16.0-universes.1';
+export const EXT_VERSION = '3.17.0-risk.1';
 
 export const defaultSettings = {
     isEnabled: true,
@@ -60,6 +60,9 @@ export const defaultSettings = {
     universe: 'normal',
     // Размер носителя для помёта у зверолюдей: small (150-160 см) | large
     carrierSize: 'small',
+    // Режим последствий: off | mild | hard. Присутствие партнёра: auto (по вселенной) | strong | soft | off
+    consequenceMode: 'mild',
+    presenceMode: 'auto',
     userDesignation: 'omega',
     charDesignation: 'alpha',
 
@@ -77,7 +80,7 @@ export const defaultSettings = {
 // Всё остальное (тема, язык, уведомления, оформление инфоблока) общее.
 export const PER_CHAT_KEYS = [
     'isEnabled',
-    'trackFor', 'carrierMode', 'universe', 'carrierSize', 'userDesignation', 'charDesignation',
+    'trackFor', 'carrierMode', 'universe', 'carrierSize', 'consequenceMode', 'presenceMode', 'userDesignation', 'charDesignation',
     'contraception', 'contraceptionUser', 'contraceptionChar',
     'hiddenPregnancy', 'obviousAtWeek', 'tryingToConceive',
     'realism', 'menstruationEnabled',
@@ -159,6 +162,18 @@ export const defaultPregnancyData = {
 
     // ── A/B/O-циклы носителя-юзера (только при universe='omegaverse') ──
 
+    // ── Риск и присутствие партнёра ──
+    risk: 0,
+    riskStage: 0,
+    presenceState: 'present',
+    awayHours: 0,
+    riskLog: [],
+    _riskCauses: {},
+    _troubleDays: 0,
+    _pendingEvent: null,
+    _riskVisitSeen: null,
+    _riskKey: null,
+
     // ── Данные ПАРТНЁРА ({{char}}) — заполняются при trackFor 'char'/'both' ──
     // Дети (babies/grownChildren) ОБЩИЕ и живут в корне p — семья одна.
     partner: null, // { ...defaultPartnerData } создаётся лениво
@@ -193,6 +208,17 @@ export const defaultPartnerData = {
     hygieneType: 'pad',
     hygieneChangedRpDate: null,
     _cycleShift: 0,
+    // ── Риск и присутствие партнёра ──
+    risk: 0,
+    riskStage: 0,
+    presenceState: 'present',
+    awayHours: 0,
+    riskLog: [],
+    _riskCauses: {},
+    _troubleDays: 0,
+    _pendingEvent: null,
+    _riskVisitSeen: null,
+    _riskKey: null,
     // A/B/O
 };
 

@@ -1,5 +1,39 @@
-import { setManualCycleDay, setManualPregnancyWeeks, setSecondParent } from './message-handler.js';
+import { setManualCycleDay, setManualPregnancyWeeks, setSecondParent, setPresence, applyRiskEvent, clearPendingRiskEvent } from './message-handler.js';
+import { STAGE_NAMES, EVENT_KINDS, CAUSE_LABELS, dominantCause, ensureRiskFields, presenceStrength } from './risk.js';
 import { reportError } from './diagnostics.js';
+function renderRiskBox(s, p) {
+    const box = document.getElementById('repro-risk-box');
+    if (!box) return;
+    if (box.contains(document.activeElement)) return;   // не перерисовываем, пока пользователь выбирает
+    const mode = s.consequenceMode || 'mild';
+    const uni = getUniverse(s);
+    const strength = presenceStrength(s, uni);
+    const rows = [];
+    for (const who of ['user', 'char']) {
+        if (!isTracked(who)) continue;
+        const c = who === 'char' ? getPartnerData() : p;
+        if (!c.isPregnant || mode === 'off') continue;
+        ensureRiskFields(c);
+        const stage = c.riskStage || 0;
+        const cause = dominantCause(c);
+        const col = ['#66bb6a', '#ffd43b', '#ff9f43', '#ff6b6b'][stage];
+        const pres = strength === 'off' ? '' : `<div style="margin:3px 0">Партнёр: <b>${c.presenceState === 'away' ? `далеко (${Math.round(c.awayHours || 0)} ч)` : 'рядом'}</b>
+            <span class="menu_button" data-act="present" data-who="${who}" style="padding:1px 6px;font-size:10px">Рядом</span>
+            <span class="menu_button" data-act="away" data-who="${who}" style="padding:1px 6px;font-size:10px">Далеко</span></div>`;
+        const opts = Object.entries(EVENT_KINDS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+        const pend = c._pendingEvent ? `<div style="color:#ff6b6b;margin:3px 0">Ожидает событие: ${{ preterm_labor: 'преждевременные роды', loss: 'потеря беременности', hospitalization: 'госпитализация' }[c._pendingEvent.type] || c._pendingEvent.type}
+            <span class="menu_button" data-act="clear" data-who="${who}" style="padding:1px 6px;font-size:10px">Отменить</span></div>` : '';
+        rows.push(`<div class="rp-risk-row" data-who="${who}" style="border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:5px 7px;margin:4px 0;font-size:11px">
+            <div><b>${carrierName(who)}</b>: ${STAGE_NAMES[stage]}${cause ? ` · ${CAUSE_LABELS[cause] || cause}` : ''}</div>
+            <div style="background:#0003;border-radius:4px;height:6px;margin:4px 0;overflow:hidden"><div style="width:${Math.round(c.risk || 0)}%;height:100%;background:${col}"></div></div>
+            ${pres}${pend}
+            <div style="display:flex;gap:4px;align-items:center"><select class="text_pole rp-risk-kind" style="flex:1">${opts}</select>
+            <span class="menu_button" data-act="event" data-who="${who}" style="padding:1px 8px;font-size:10px">Применить</span></div>
+        </div>`);
+    }
+    box.innerHTML = rows.length ? `<div style="font-size:10px;opacity:.6;margin-top:4px">Самочувствие и риск</div>${rows.join('')}` : '';
+}
+
 function cycleSummary(who, c, s) {
     if (!hasCycle(s, who) && !c.isPregnant) return isAbo(s) ? roleLabel(s, who) : 'Состояние';
     if (c.isPregnant && pregnancyIsKnown(c, s)) return `Беременность — ${c.pregnancyWeeks || 0} нед.`;
@@ -1224,6 +1258,18 @@ export function syncUI() {
     if (carrierSel) carrierSel.value = s.carrierMode || 'user';
     const uniSel = el('repro-universe');
     if (uniSel) uniSel.value = getUniverse(s).id;
+    const conseqSel = el('repro-conseq');
+    if (conseqSel) conseqSel.value = s.consequenceMode || 'mild';
+    const presSel = el('repro-presence');
+    if (presSel) presSel.value = s.presenceMode || 'auto';
+    // Подписи ролей зависят от вселенной
+    const roleNames = getUniverse(s).id === 'ds' ? { alpha: 'Доминант', beta: 'Нейтрал', omega: 'Сабмиссив' } : { alpha: 'Альфа', beta: 'Бета', omega: 'Омега' };
+    for (const id of ['repro-user-desig', 'repro-char-desig']) {
+        const sel = el(id);
+        if (!sel) continue;
+        for (const opt of sel.options) if (roleNames[opt.value]) opt.textContent = roleNames[opt.value];
+    }
+    renderRiskBox(s, p);
     const sizeRow = el('repro-size-row');
     if (sizeRow) sizeRow.style.display = getUniverse(s).litters ? '' : 'none';
     const sizeSel = el('repro-carrier-size');
@@ -1254,7 +1300,7 @@ export function syncUI() {
     const durCust = el('repro-duration-custom');
     if (durSel) {
         const dur = s.pregnancyDuration || 40;
-        const std = ['12','16','20','24','28','32','36','40'];
+        const std = ['12','16','20','24','28','32','34','36','38','40'];
         if (std.includes(String(dur))) {
             durSel.value = String(dur);
             if (durCust) durCust.style.display = 'none';
@@ -1550,6 +1596,24 @@ export function setupUI() {
                     <option value="large">Крупный, помёт 1–2</option>
                 </select>
             </div>
+            <div class="rp-setting-row">
+                <label for="repro-conseq">Последствия:</label>
+                <select id="repro-conseq" class="text_pole" title="Выкл: только описание симптомов. Мягко: предупреждения и осложнения, без потери беременности. Жёстко: полная лестница, включая преждевременные роды и потерю.">
+                    <option value="off">Выкл</option>
+                    <option value="mild">Мягко</option>
+                    <option value="hard">Жёстко</option>
+                </select>
+            </div>
+            <div class="rp-setting-row">
+                <label for="repro-presence">Присутствие партнёра:</label>
+                <select id="repro-presence" class="text_pole" title="Насколько здоровью беременного носителя нужен партнёр рядом. По умолчанию зависит от вселенной.">
+                    <option value="auto">По вселенной</option>
+                    <option value="strong">Жёсткое</option>
+                    <option value="soft">Мягкое</option>
+                    <option value="off">Выкл</option>
+                </select>
+            </div>
+            <div id="repro-risk-box"></div>
             <div id="repro-role-settings">
                 <div class="rp-setting-row"><label for="repro-user-desig">Я:</label><select id="repro-user-desig" class="text_pole"><option value="alpha">Альфа</option><option value="beta">Бета</option><option value="omega">Омега</option></select></div>
                 <div class="rp-setting-row"><label for="repro-char-desig">Бот:</label><select id="repro-char-desig" class="text_pole"><option value="alpha">Альфа</option><option value="beta">Бета</option><option value="omega">Омега</option></select></div>
@@ -1579,8 +1643,8 @@ export function setupUI() {
                 <select id="repro-duration" class="text_pole" style="flex:1">
                     <option value="12">12 нед.</option><option value="16">16</option>
                     <option value="20">20</option><option value="24">24</option>
-                    <option value="28">28</option><option value="32">32</option>
-                    <option value="36">36</option><option value="40" selected>40 (стд)</option>
+                    <option value="28">28</option><option value="32">32</option><option value="34">34</option>
+                    <option value="36">36</option><option value="38">38</option><option value="40" selected>40 (стд)</option>
                     <option value="custom">Своё</option>
                 </select>
                 <input type="number" id="repro-duration-custom" class="text_pole" style="width:45px;display:none" min="4" max="100">
@@ -1832,6 +1896,21 @@ export function setupUI() {
             saveSettingsDebounced();
             updatePromptInjection();
             refreshAll();
+        });
+        $('#repro-conseq').on('change', function() {
+            getSettings().consequenceMode = ['off', 'mild', 'hard'].includes(this.value) ? this.value : 'mild';
+            saveSettingsDebounced(); updatePromptInjection(); refreshAll();
+        });
+        $('#repro-presence').on('change', function() {
+            getSettings().presenceMode = ['auto', 'strong', 'soft', 'off'].includes(this.value) ? this.value : 'auto';
+            saveSettingsDebounced(); updatePromptInjection(); refreshAll();
+        });
+        $(document).on('click', '#repro-risk-box [data-act]', function() {
+            const who = $(this).attr('data-who');
+            const act = $(this).attr('data-act');
+            if (act === 'present' || act === 'away') setPresence(who, act);
+            else if (act === 'clear') clearPendingRiskEvent(who);
+            else if (act === 'event') applyRiskEvent(who, $(this).closest('.rp-risk-row').find('.rp-risk-kind').val());
         });
         $('#repro-carrier-size').on('change', function() {
             getSettings().carrierSize = this.value === 'large' ? 'large' : 'small';
