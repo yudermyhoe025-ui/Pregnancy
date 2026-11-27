@@ -1,4 +1,4 @@
-import { setManualCycleDay, setManualPregnancyWeeks, setSecondParent, setPresence, applyRiskEvent, clearPendingRiskEvent } from './message-handler.js';
+import { setManualCycleDay, setManualPregnancyWeeks, setSecondParent, setPresence, applyRiskEvent, clearPendingRiskEvent, setMarkedBy, doctorVisit } from './message-handler.js';
 import { STAGE_NAMES, EVENT_KINDS, CAUSE_LABELS, dominantCause, ensureRiskFields, presenceStrength } from './risk.js';
 import { reportError } from './diagnostics.js';
 function renderRiskBox(s, p) {
@@ -28,10 +28,31 @@ function renderRiskBox(s, p) {
             <div style="background:#0003;border-radius:4px;height:6px;margin:4px 0;overflow:hidden"><div style="width:${Math.round(c.risk || 0)}%;height:100%;background:${col}"></div></div>
             ${pres}${pend}
             <div style="display:flex;gap:4px;align-items:center"><select class="text_pole rp-risk-kind" style="flex:1">${opts}</select>
-            <span class="menu_button" data-act="event" data-who="${who}" style="padding:1px 8px;font-size:10px">Применить</span></div>
+            <span class="menu_button" data-act="event" data-who="${who}" style="padding:1px 8px;font-size:10px">Применить</span>
+            <span class="menu_button" data-act="visit" data-who="${who}" style="padding:1px 8px;font-size:10px">Осмотр</span></div>
         </div>`);
     }
-    box.innerHTML = rows.length ? `<div style="font-size:10px;opacity:.6;margin-top:4px">Самочувствие и риск</div>${rows.join('')}` : '';
+    let extra = '';
+    if (uni.id === 'omegaverse') {
+        extra += '<div style="font-size:10px;opacity:.6;margin-top:6px">Метка другого альфы (имя или {{user}}, {{char}})</div>';
+        for (const who of ['user', 'char']) {
+            if (!isTracked(who)) continue;
+            const c = who === 'char' ? getPartnerData() : p;
+            ensureRiskFields(c);
+            const burn = Math.round((c._markBurn || 0) * 100);
+            extra += `<div style="display:flex;gap:4px;align-items:center;margin:3px 0;font-size:11px"><span style="min-width:70px">${carrierName(who)}</span>
+                <input type="text" class="text_pole rp-mark-input" data-who="${who}" value="${String(c.markedBy || '').replace(/"/g, '&quot;')}" placeholder="нет метки" style="flex:1">
+                ${c.markedBy ? `<span style="opacity:.7">${burn}%</span>` : ''}</div>`;
+        }
+    }
+    if (getUniverse(s).twoLayer) {
+        extra += `<div style="font-size:10px;opacity:.6;margin-top:6px">Внешний тип родителей (определяет тип ребёнка)</div>
+            <div style="display:flex;gap:6px;font-size:11px;align-items:center">
+            ${['user', 'char'].map(w => `<span>${carrierName(w)}</span><select class="text_pole rp-type-select" data-who="${w}"><option value="XX"${(w === 'char' ? s.charType : s.userType) !== 'XY' ? ' selected' : ''}>XX</option><option value="XY"${(w === 'char' ? s.charType : s.userType) === 'XY' ? ' selected' : ''}>XY</option></select>`).join('')}</div>`;
+    }
+    const head = rows.length ? `<div style="font-size:10px;opacity:.6;margin-top:4px">Самочувствие и риск</div>${rows.join('')}`
+        : `<div style="font-size:10px;opacity:.5;margin-top:4px">Блок самочувствия появится, когда отслеживаемый носитель будет беременен${mode === 'off' ? ' (и режим последствий не «Выкл»)' : ''}.</div>`;
+    box.innerHTML = head + extra;
 }
 
 function cycleSummary(who, c, s) {
@@ -1910,7 +1931,17 @@ export function setupUI() {
             const act = $(this).attr('data-act');
             if (act === 'present' || act === 'away') setPresence(who, act);
             else if (act === 'clear') clearPendingRiskEvent(who);
+            else if (act === 'visit') doctorVisit(who);
             else if (act === 'event') applyRiskEvent(who, $(this).closest('.rp-risk-row').find('.rp-risk-kind').val());
+        });
+        $(document).on('change', '#repro-risk-box .rp-mark-input', function() {
+            setMarkedBy($(this).attr('data-who'), this.value);
+        });
+        $(document).on('change', '#repro-risk-box .rp-type-select', function() {
+            const s = getSettings();
+            const v = this.value === 'XY' ? 'XY' : 'XX';
+            if ($(this).attr('data-who') === 'char') s.charType = v; else s.userType = v;
+            saveSettingsDebounced(); updatePromptInjection();
         });
         $('#repro-carrier-size').on('change', function() {
             getSettings().carrierSize = this.value === 'large' ? 'large' : 'small';

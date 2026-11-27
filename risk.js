@@ -19,13 +19,14 @@ export const EVENT_KINDS = {
     stress:        { risk: 6,   label: 'Сильный стресс' },
     overwork:      { risk: 5,   label: 'Перегрузка' },
     neglect:       { risk: 8,   label: 'Пренебрежение рекомендациями' },
+    nest_disturbed:{ risk: 6,   label: 'Нарушено гнездо' },
     care:          { risk: -8,  label: 'Забота и покой' },
     visit:         { risk: -20, label: 'Осмотр у врача' },
 };
 
 const CAUSE_FOR_KIND = {
     injury_light: 'injury', injury_medium: 'injury', injury_heavy: 'injury',
-    stress: 'stress', overwork: 'stress', neglect: 'neglect',
+    stress: 'stress', overwork: 'stress', neglect: 'neglect', nest_disturbed: 'stress',
 };
 
 export const CAUSE_LABELS = {
@@ -192,6 +193,9 @@ export function riskTick(c, o) {
     delta += prate * days;
     if (prate > 0) addCause(c, 'presence', prate * days);
 
+    // Теневая течка без партнёра рядом
+    if (o.shadow && isAway) { delta += 8 * days; addCause(c, 'presence', 8 * days); }
+
     // Просроченные осмотры
     if (o.overdue) { delta += 1.5 * days; addCause(c, 'overdue', 1.5 * days); }
 
@@ -253,4 +257,26 @@ export function parseRiskTags(text) {
         if (EVENT_KINDS[kind]) out.events.push({ who: m[1].toLowerCase(), kind });
     }
     return out;
+}
+
+// Омегаверс: выжигание чужой метки и теневые течки. Возвращает true, если состояние изменилось.
+export function omegaTick(c, o) {
+    ensureRiskFields(c);
+    if (!c.isPregnant) return false;
+    const progress = clamp(o.progress || 0, 0, 1);
+    const days = Math.max(0, (Number(o.hours) || 0) / 24);
+    const rand = o.rand || Math.random;
+    let changed = false;
+    if (c.markedBy) {
+        const burn = Math.max(c._markBurn || 0, progress);
+        if (burn !== c._markBurn) { c._markBurn = burn; changed = true; }
+    }
+    const base = progress < 1 / 3 ? 0.03 : progress < 2 / 3 ? 0.08 : 0.25;
+    const pr = 1 - Math.pow(1 - base, days);
+    if (!((c._shadowUntil || 0) > (o.nowMs || 0)) && days > 0 && rand() < pr) {
+        c._shadowUntil = (o.nowMs || 0) + (2 + Math.floor(rand() * 5)) * 3600000;
+        pushLog(c, 'Теневая течка', o.rp);
+        changed = true;
+    }
+    return changed;
 }

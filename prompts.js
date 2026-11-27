@@ -5,10 +5,11 @@ import { reportError } from './diagnostics.js';
 
 import { setExtensionPrompt, extension_prompts, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
-import { getSettings, getPregnancyData, getPartnerData, getCycleDay, isTracked, getContraception } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, isTracked, getContraception, carrierName } from './state.js';
 import { isOmegaverse, isAbo, hasMenstrualCycle, hasAnyTracking, canCarry, hasCycle, designationOf, cyclePhase, fertileInfo } from './omegaverse.js';
 import { getUniverse, phaseAt, cycleLen } from './universe.js';
 import { ensureRiskFields, dominantCause, presenceStrength, STAGE_NAMES } from './risk.js';
+import { ensureFetusTypes, normType, sexKnowable, typeKnowable } from './sexlayer.js';
 import { pregnancyIsKnown, getPostpartum, monthsTrying } from './pregnancy.js';
 import { fertileWindow, conceptionStruggle } from './fertility.js';
 import { getFlow, getHygieneState, realismPromptLine, hoursBetween } from './cycle-realism.js';
@@ -95,7 +96,7 @@ export function getBasePrompt() {
     if (isAbo(s)) b += active.map(w => `${w}=${designationOf(s,w)}`).join(', ') + '.\n';
     b += active.map(w => carrierCycleLine(w, s)).join(' | ') + '\n';
     if (isMens && s.menstruationEnabled === false) b += 'Menstrual bleeding is disabled; days 1–11 are follicular. Keep ovulation/heat and the rest of the cycle. No menstrual hygiene reminders.\n';
-    b += cycleScenePrompt(s) + (isMens ? realismBlock(s, p) : '') + riskBlock(s, p);
+    b += cycleScenePrompt(s) + (isMens ? realismBlock(s, p) : '') + riskBlock(s, p) + omegaBlock(s, p);
     if (isMens && s.menstruationEnabled !== false) {
         for (const who of active) {
             const c = who === 'char' ? getPartnerData() : p;
@@ -144,6 +145,7 @@ function compactPregnancy(who, s) {
     const pct = Math.round(weeks/duration*100);
     let b = `[${known ? nm + ' IS PREGNANT' : who + ' PRIVATE SIMULATION'}] ${weeks}/${duration} weeks (${pct}%), fetuses=${c.fetusCount||1}, sex=${c.fetusSexRevealed?sexToText(c.fetusSex):'unknown'}, health=${c.healthStatus||'normal'}. Cycle paused.\n`;
     if (c.fatherName) b += `Second parent: ${JSON.stringify(c.fatherName)}; preserve this identity for the children.\n`;
+    if (getUniverse(s).twoLayer) b += sexLayerLine(s, c, who, pct / 100, known);
     b += 'BABY_TRAITS appearance must follow established parental descriptions and any explicit child description; do not invent hair/eye colours or unusual traits. If unknown, use an empty appearance array.\n';
     if (!known) b += 'Discovery not recorded: these are private simulation facts, not character knowledge. Follow actual tests/disclosures in the scene.\n';
     b += 'Tracker term and fetal count are authoritative; do not invent multiples or delivery. Due date alone never means a baby was born. An established discovery in this scene (examination or reliable in-world knowledge, including fantasy settings) confirming a different count: RP_STATUS fetus_count (1–4) and fetus_count_confirmed:true, in partner for char. The count must agree with discoveries in note and symptoms; wishes and guesses never change it.\n';
@@ -254,6 +256,57 @@ function riskBlock(s, p) {
     if (!any) return '';
     b += 'When the scene shows a partner leaving or arriving add <!-- [PRESENCE:user:away] --> or <!-- [PRESENCE:char:present] --> (the carrier named is the one whose partner moves). For something that actually happened to a pregnant carrier in this reply add <!-- [RISK_EVENT:user:injury:light|medium|heavy] -->, or stress, overwork, neglect (ignored medical advice), care (rest and care). One tag per event, never for plans or hypotheticals.\n';
     return '[WELLBEING]\n' + b;
+}
+
+// Два слоя пола: истинный пол (гениталии, роль) и внешний тип XX/XY. Значения уже брошены трекером.
+function sexLayerLine(s, c, who, progress, known) {
+    const own = normType(who === 'char' ? s.charType : s.userType);
+    const other = normType(who === 'char' ? s.userType : s.charType);
+    const types = ensureFetusTypes(c, own, other);
+    const sexes = (c.fetusSex && c.fetusSex.length) ? c.fetusSex : [];
+    let b = 'Sex has two independent layers: true sex (genitals, determines role and anatomy) and appearance type XX (more feminine looking) or XY (more masculine looking); appearance never changes anatomy. ';
+    if (!known) return b + 'Neither is known to the characters yet.\\n';
+    if (sexKnowable(progress) && sexes.length) b += `True sex can be seen on an ordinary ultrasound now; preset per fetus in order: ${sexes.join(',')} (use exactly these if revealed). `;
+    else b += 'True sex cannot be seen yet. ';
+    if (typeKnowable(progress)) b += `Appearance type is visible only to an expert examiner now; preset per fetus in order: ${types.join(',')}.`;
+    else b += 'Appearance type cannot be determined before late term or birth; at birth state both layers.';
+    return b + '\\n';
+}
+
+// Омегаверс: беременность, запах, гнездование, железы, теневые течки, метки, роды.
+function omegaBlock(s, p) {
+    if (getUniverse(s).id !== 'omegaverse' || (s.consequenceMode || 'mild') === 'off') return '';
+    const duration = s.pregnancyDuration || 40;
+    const lines = [];
+    for (const who of ['user', 'char']) {
+        if (!isTracked(who)) continue;
+        const c = who === 'char' ? getPartnerData() : p;
+        if (!c.isPregnant) continue;
+        ensureRiskFields(c);
+        const nm = who === 'char' ? '{{char}}' : '{{user}}';
+        const { weeks } = calculateWeeksFromDates(c.conceptionDate, p.rpDate, c.pregnancyWeeks);
+        const pr = Math.max(0, Math.min(1, weeks / duration));
+        const nowMs = p.rpDate ? Date.parse(p.rpDate) : 0;
+        const parts = [];
+        parts.push(pr < 1 / 3 ? 'scent shifts sharper and anxious (modify the existing base scent, never replace it)'
+            : pr < 2 / 3 ? 'scent deepens and sweetens (modify the existing base scent)' : 'scent is heady and almost impossible to hide (modify the existing base scent)');
+        if (pr >= 0.12) parts.push(`nesting urge ${pr < 0.4 ? 'mild' : pr < 0.75 ? 'strong' : 'all-consuming'}: gathers the partner's scented items, guards the nest, upset when it is disturbed${pr >= 0.75 ? ', rarely leaves home' : ''}`);
+        if (pr >= 1 / 3) parts.push('scent glands at neck and wrists swell and leak; the partner\'s touch there soothes');
+        if (pr >= 0.85) parts.push('pre-milk leaks when the partner is near or in strong emotion');
+        if ((c._shadowUntil || 0) > nowMs) parts.push('SHADOW HEAT NOW: clingy, aroused, needs the partner\'s scent and touch for relief; the partner being away makes it hard');
+        if (c.markedBy) {
+            const father = (c.fatherName || (who === 'user' ? carrierName('char') : carrierName('user'))).trim().toLowerCase();
+            if (father !== String(c.markedBy).trim().toLowerCase()) {
+                const burn = c._markBurn || 0;
+                if (burn < 1 / 3) parts.push(`the old mark from ${c.markedBy} burns and itches as the child's pheromones push it out`);
+                else if (burn < 2 / 3) parts.push(`the old mark from ${c.markedBy} is visibly closing without a scar, pain dulling and retreating from the glands`);
+                else if (burn < 0.9) parts.push(`the old mark from ${c.markedBy} is almost gone`);
+            }
+        }
+        if (pr >= 0.9) parts.push(`labor: the partner's presence shortens it and calms contractions, absence makes it longer and harder${c.presenceState === 'away' ? ' (the partner is away now)' : ''}`);
+        lines.push(`${nm}: ${parts.join('; ')}.`);
+    }
+    return lines.length ? '[OMEGAVERSE PREGNANCY] Show only what the scene supports.\n' + lines.join('\n') + '\n' : '';
 }
 
 // ─── Режим «планируем» + сложности с зачатием ───

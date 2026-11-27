@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════
 
 export const extensionName = 'reproductive-system';
-export const EXT_VERSION = '3.17.0-risk.1';
+export const EXT_VERSION = '3.18.0-omega.1';
 
 export const defaultSettings = {
     isEnabled: true,
@@ -62,6 +62,9 @@ export const defaultSettings = {
     carrierSize: 'small',
     // Режим последствий: off | mild | hard. Присутствие партнёра: auto (по вселенной) | strong | soft | off
     consequenceMode: 'mild',
+    // Внешний тип родителей (XX более феминный, XY более маскулинный); нужен для типа ребёнка
+    userType: 'XX',
+    charType: 'XY',
     presenceMode: 'auto',
     userDesignation: 'omega',
     charDesignation: 'alpha',
@@ -80,7 +83,7 @@ export const defaultSettings = {
 // Всё остальное (тема, язык, уведомления, оформление инфоблока) общее.
 export const PER_CHAT_KEYS = [
     'isEnabled',
-    'trackFor', 'carrierMode', 'universe', 'carrierSize', 'consequenceMode', 'presenceMode', 'userDesignation', 'charDesignation',
+    'trackFor', 'carrierMode', 'universe', 'carrierSize', 'consequenceMode', 'presenceMode', 'userType', 'charType', 'userDesignation', 'charDesignation',
     'contraception', 'contraceptionUser', 'contraceptionChar',
     'hiddenPregnancy', 'obviousAtWeek', 'tryingToConceive',
     'realism', 'menstruationEnabled',
@@ -173,6 +176,11 @@ export const defaultPregnancyData = {
     _pendingEvent: null,
     _riskVisitSeen: null,
     _riskKey: null,
+    markedBy: '',
+    _markBurn: 0,
+    _shadowUntil: 0,
+    fetusType: [],
+    _fetusTypeKey: null,
 
     // ── Данные ПАРТНЁРА ({{char}}) — заполняются при trackFor 'char'/'both' ──
     // Дети (babies/grownChildren) ОБЩИЕ и живут в корне p — семья одна.

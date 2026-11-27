@@ -6,7 +6,7 @@ import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChat
 import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink, stripReproTags, hasReproTags, messageRaw, confirmedFetusCount } from './scanner.js';
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, getPostpartum, canTriggerBirth } from './pregnancy.js';
 import { getPartnerData, carrierName, isTracked, resolveNameMacros, getCarriers } from './state.js';
-import { riskTick, applyEvent, refreshStage, ensureRiskFields, overdueDays, parseRiskTags, presenceStrength, STAGE_NAMES, EVENT_KINDS } from './risk.js';
+import { riskTick, omegaTick, applyEvent, refreshStage, ensureRiskFields, overdueDays, parseRiskTags, presenceStrength, STAGE_NAMES, EVENT_KINDS } from './risk.js';
 import { hasMenstrualCycle, hasCycle, cyclePhase } from './omegaverse.js';
 import { getUniverse, advanceCycleDay, phaseAt, cycleLen } from './universe.js';
 import { updateBabyCare } from './baby-care.js';
@@ -1099,7 +1099,8 @@ function runRiskTick(s, p, hours, nowMs) {
             changed = true;
         }
         const od = overdueDays(c, nowMs, termW) > 0;
-        const r = riskTick(c, riskOpts(s, p, c, { hours, overdue: od, nowMs }));
+        if (getUniverse(s).id === 'omegaverse' && omegaTick(c, riskOpts(s, p, c, { hours, nowMs }))) changed = true;
+        const r = riskTick(c, riskOpts(s, p, c, { hours, overdue: od, nowMs, shadow: (c._shadowUntil || 0) > nowMs }));
         if (r.changed) changed = true;
         notifyStage(s, who, r);
     }
@@ -1159,6 +1160,35 @@ export function applyRiskEvent(who, kind) {
     ensureRiskFields(c);
     applyEvent(c, kind, riskOpts(s, p, c));
     notifyStage(s, who, refreshStage(c, riskOpts(s, p, c)));
+    refreshRegenSnapshot();
+    saveSettingsDebounced(); syncUI(); updatePromptInjection(); setTimeout(renderInfoblock, 200);
+    return true;
+}
+
+// Метка от другого альфы (омегаверс): имя можно писать макросами {{user}} / {{char}}.
+export function setMarkedBy(who, name) {
+    if (!['user', 'char'].includes(who)) return false;
+    const c = who === 'char' ? getPartnerData() : getPregnancyData();
+    ensureRiskFields(c);
+    const next = resolveNameMacros(name).trim().slice(0, 80);
+    if (next !== c.markedBy) { c.markedBy = next; c._markBurn = 0; }   // перемётка начинает выжигание заново
+    refreshRegenSnapshot();
+    saveSettingsDebounced(); syncUI(); updatePromptInjection();
+    return true;
+}
+
+// Осмотр у врача: фиксирует дату, снижает накопленный риск.
+export function doctorVisit(who) {
+    if (!['user', 'char'].includes(who)) return false;
+    const s = getSettings(), p = getPregnancyData();
+    const c = who === 'char' ? getPartnerData() : p;
+    ensureRiskFields(c);
+    c.lastDoctorVisitRpDate = p.rpDate || new Date().toISOString();
+    if (who === 'char') c.lastDoctorVisitRpDate = c.lastDoctorVisitRpDate;
+    c._riskVisitSeen = c.lastDoctorVisitRpDate;
+    applyEvent(c, 'visit', riskOpts(s, p, c));
+    refreshStage(c, riskOpts(s, p, c));
+    if (s.showNotifications) showNotification(`<i class="fa-solid fa-stethoscope"></i> Осмотр: ${carrierName(who)}`, 'info');
     refreshRegenSnapshot();
     saveSettingsDebounced(); syncUI(); updatePromptInjection(); setTimeout(renderInfoblock, 200);
     return true;

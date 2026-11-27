@@ -8,6 +8,7 @@ import { CHANCES } from './config.js';
 import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, isManualCycleProtected, carrierName, resolveNameMacros, L, getContraception, syncBabyLegacyFields } from './state.js';
 import { canCarry, hasMenstrualCycle, fertilityMod } from './omegaverse.js';
 import { getUniverse, advanceCycleDay, cycleLen, rollLitter } from './universe.js';
+import { ensureFetusTypes, normType } from './sexlayer.js';
 import { rollTest, isObvious, postpartumState, fertileWindow, inheritLooks, conceptionStruggle, missedDays } from './fertility.js';
 import { roll, getCycleModifier, formatSexIcons, formatFetusCount, calculateWeeksFromDates, getHealthInfo, rollPlannedComplications } from './helpers.js';
 import { calculateConceptionDate } from './date-parser.js';
@@ -188,6 +189,7 @@ export function applyScanResult(result) {
 
         // Save pregnancy data before resetting
         const babySex = p.fetusSex.length > 0 ? [...p.fetusSex] : ['M'];
+        const babyTypes = twoLayerTypes(p, s, 'user');
         const newBabyCount = p.fetusCount || 1;
         const birthRpDate = resolveBirthRpDate(p, p, s, birthSource);
 
@@ -256,7 +258,7 @@ export function applyScanResult(result) {
         for (let i = 0; i < newBabyCount; i++) {
             p.babies.push({
                 name: '',
-                sex: babySex[i] || 'M',
+                sex: babySex[i] || 'M', type: babyTypes[i] || null,
                 health: 'normal',
                 mood: 'спокойный',
                 sleep: 'спит',
@@ -287,7 +289,7 @@ export function applyScanResult(result) {
         for (let i = 0; i < newBabyCount; i++) {
             const mt = modelTraits[i] || {};
             dialogBabies.push({
-                sex: babySex[i] || 'M',
+                sex: babySex[i] || 'M', type: babyTypes[i] || null,
                 name: mt.name || mt.имя || '',
                 fatherName: p._secondParentManual ? p.fatherName : p.fatherName || mt.fatherName || mt.father || mt.отец || '',
                 personality: Array.isArray(mt.personality) ? mt.personality
@@ -828,6 +830,14 @@ export function createPregnancyFromStateTag(pregState, { notify = true } = {}) {
 // conceptionDateISO: ISO-строка даты зачатия (от пользователя через datepicker)
 // fetusCount: 1-4
 // fetusSex: массив ['M'/'F'], опционально — если null, генерится случайно
+// Внешний тип плодов (XX/XY) для вселенных с двумя слоями пола; в обычном мире пусто.
+export function twoLayerTypes(c, s, who) {
+    if (!getUniverse(s).twoLayer) return [];
+    const own = normType(who === 'char' ? s.charType : s.userType);
+    const other = normType(who === 'char' ? s.userType : s.charType);
+    return ensureFetusTypes(c, own, other);
+}
+
 export function startManualPregnancy(conceptionDateISO, fetusCount, fetusSex = null, secondParent = undefined) {
     const s = getSettings();
     const p = getPregnancyData();
@@ -1101,6 +1111,7 @@ export function partnerBirth(babyTraits, options = {}) {
 
     const count = c.fetusCount || 1;
     const sexes = c.fetusSex?.length ? [...c.fetusSex] : ['M'];
+    const babyTypes = twoLayerTypes(c, s, 'char');
     const birthRpDate = resolveBirthRpDate(c, p, s, birthSource);
     const motherName = carrierName('char');
     const fatherName = c._secondParentManual ? c.fatherName : c.fatherName || carrierName('user');
@@ -1122,7 +1133,7 @@ export function partnerBirth(babyTraits, options = {}) {
     const startIdx = p.babies.length;
     for (let i = 0; i < count; i++) {
         p.babies.push({
-            name: '', sex: sexes[i] || 'M', health: 'normal', mood: 'спокойный', sleep: 'спит',
+            name: '', sex: sexes[i] || 'M', type: babyTypes[i] || null, health: 'normal', mood: 'спокойный', sleep: 'спит',
             diaperClean: true, teething: false, colicky: false, feedingType: '',
             milestones: [], personality: [], appearance: newbornLooks[i],
             fatherName, motherName, bornBy: 'char',
@@ -1154,7 +1165,7 @@ export function partnerBirth(babyTraits, options = {}) {
     for (let i = 0; i < count; i++) {
         const mt = modelTraits[i] || {};
         dialogBabies.push({
-            sex: sexes[i] || 'M',
+            sex: sexes[i] || 'M', type: babyTypes[i] || null,
             name: mt.name || mt.имя || '',
             fatherName: c._secondParentManual ? fatherName : fatherName || mt.fatherName || mt.father || '',
             personality: Array.isArray(mt.personality) ? mt.personality : null,

@@ -20,7 +20,7 @@ export const UNIVERSES = {
     },
     // Омегаверс: ежемесячный цикл из четырёх фаз, без менструации.
     omegaverse: {
-        id: 'omegaverse', label: 'Омегаверс', kind: 'phased', abo: true,
+        id: 'omegaverse', label: 'Омегаверс', kind: 'phased', abo: true, twoLayer: true,
         term: 38, twins: 5, triplets: 0.3, presence: 'strong', menstruation: false,
         phases: [
             ph('proestrus', 'Проэструс', 'Proestrus', 3, 4, { fertility: 0.3, color: '#e8a0c8', icon: 'fa-hourglass-start' }),
@@ -31,7 +31,7 @@ export const UNIVERSES = {
     },
     // Д/с: течка и гон раз в три месяца, до 5 дней, без менструации.
     ds: {
-        id: 'ds', label: 'Д/с', kind: 'phased', abo: true, period: 90,
+        id: 'ds', label: 'Д/с', kind: 'phased', abo: true, twoLayer: true, period: 90,
         term: 38, twins: 3, triplets: 0.1, presence: 'soft', menstruation: false,
         phases: [
             ph('prep', 'Подготовка', 'Preparation', 2, 3, { fertility: 0.3, color: '#e8a0c8', icon: 'fa-hourglass-start' }),
@@ -42,7 +42,7 @@ export const UNIVERSES = {
     },
     // Зверолюди: цикла нет, раз в три месяца брачный сезон на 3-4 дня.
     beastmen: {
-        id: 'beastmen', label: 'Зверолюди', kind: 'phased', abo: false, period: 90, season: true,
+        id: 'beastmen', label: 'Зверолюди', kind: 'phased', abo: false, twoLayer: true, period: 90, season: true,
         term: 32, twins: 0, triplets: 0, presence: 'soft', menstruation: false, litters: true,
         phases: [
             ph('rest', 'Покой', 'Rest', 0, 0, { fertility: 0.05, fill: true, color: '#66bb6a', icon: 'fa-seedling' }),
